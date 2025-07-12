@@ -4,6 +4,7 @@ import { sendEmailDoctorApplication } from "../utils/sendEmailDoctorApplication.
 import { generateToken } from "../middlewares/auth.js";
 import mongoose from "mongoose";
 import { uploadImage, uploadMultipleImages } from "../config/cloudinary.js";
+
 // Register a new doctor with avatar and certification images
 export const registerDoctor = async (req, res) => {
   try {
@@ -38,26 +39,63 @@ export const registerDoctor = async (req, res) => {
       });
     }
 
-    // Handle avatar upload
+    // Handle avatar upload - với memory storage, dùng buffer thay vì path
     let avatarUrl = null;
-    if (req.files.avatar && req.files.avatar[0]) {
-      avatarUrl = await uploadImage(req.files.avatar[0].path, "doctor_avatars");
+    if (req.files && req.files.length > 0) {
+      const avatarFile = req.files.find(file => file.fieldname === 'avatar');
+      if (avatarFile) {
+        try {
+          // uploadImage sẽ nhận buffer thay vì path
+          avatarUrl = await uploadImage(avatarFile.buffer, "doctor_avatars");
+        } catch (uploadError) {
+          console.error('Avatar upload error:', uploadError);
+        }
+      }
     }
 
-    // Handle certifications and images
-    let parsedCertifications = certifications ? JSON.parse(certifications) : [];
-    if (req.files.certificationImages) {
-      const certUrls = await uploadMultipleImages(req.files.certificationImages, "doctor_certifications");
-      parsedCertifications = parsedCertifications.map((cert, index) => ({
-        ...cert,
-        url: certUrls[index] || cert.url,
-        uploadedAt: cert.uploadedAt || new Date(),
-      }));
+    // Handle certifications and images - với upload.any(), req.files là array
+    let parsedCertifications = [];
+    try {
+      parsedCertifications = certifications ? JSON.parse(certifications) : [];
+    } catch (parseError) {
+      console.error('Certifications JSON parse error:', parseError);
+      parsedCertifications = [];
     }
 
-    // Parse other array fields
-    const parsedEducation = education ? JSON.parse(education) : [];
-    const parsedWorkExperience = workExperience ? JSON.parse(workExperience) : [];
+    if (req.files && req.files.length > 0) {
+      const certificationFiles = req.files.filter(file => file.fieldname === 'certificationImages');
+      if (certificationFiles.length > 0) {
+        try {
+          // uploadMultipleImages sẽ nhận array của buffers thay vì paths
+          const certUrls = await uploadMultipleImages(certificationFiles.map(file => file.buffer), "doctor_certifications");
+          parsedCertifications = parsedCertifications.map((cert, index) => ({
+            ...cert,
+            url: certUrls[index] || cert.url,
+            uploadedAt: cert.uploadedAt || new Date(),
+          }));
+        } catch (uploadError) {
+          console.error('Certification images upload error:', uploadError);
+        }
+      }
+    }
+
+    // Parse other array fields safely
+    let parsedEducation = [];
+    let parsedWorkExperience = [];
+    
+    try {
+      parsedEducation = education ? JSON.parse(education) : [];
+    } catch (parseError) {
+      console.error('Education JSON parse error:', parseError);
+      parsedEducation = [];
+    }
+
+    try {
+      parsedWorkExperience = workExperience ? JSON.parse(workExperience) : [];
+    } catch (parseError) {
+      console.error('Work experience JSON parse error:', parseError);
+      parsedWorkExperience = [];
+    }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -86,11 +124,17 @@ export const registerDoctor = async (req, res) => {
     // Save doctor
     await doctor.save();
 
-    // Send application email
-    await sendEmailDoctorApplication(doctor);
+    // Send application email (wrapped in try-catch)
+    try {
+      await sendEmailDoctorApplication(doctor);
+    } catch (emailError) {
+      console.error('Email sending error:', emailError);
+      // Continue without failing the registration
+    }
 
     res.status(200).json({ message: "Đăng ký bác sĩ thành công. Vui lòng chờ xét duyệt đơn đăng ký." });
   } catch (error) {
+    console.error('Doctor registration error:', error);
     res.status(500).json({ message: error.message });
   }
 };

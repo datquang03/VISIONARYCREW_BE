@@ -10,7 +10,9 @@ import { admin, protectRouter } from "../middlewares/auth.js";
 import multer from "multer";
 import path from "path";
 
-// Configure multer with file filter for image validation
+// Configure multer with memory storage (không cần thư mục uploads)
+const storage = multer.memoryStorage();
+
 const fileFilter = (req, file, cb) => {
   const allowedExtensions = [".svg", ".png", ".jpg", ".jpeg"];
   const extname = path.extname(file.originalname).toLowerCase();
@@ -21,29 +23,20 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-
 const upload = multer({
   storage,
   fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  }
 });
 
-// Define fields for multiple file uploads
-const uploadFields = upload.fields([
-  { name: "avatar", maxCount: 1 },
-  { name: "certificationImages", maxCount: 10 },
-]);
+// Sử dụng upload.any() để chấp nhận bất kỳ field nào
+const uploadAny = upload.any();
 
 const router = express.Router();
 
-router.post("/register", uploadFields, registerDoctor);
+router.post("/register", uploadAny, registerDoctor);
 router.post("/login", login);
 router.get("/profile", protectRouter, getMyProfile);
 router.get("/:id", getDoctorById);

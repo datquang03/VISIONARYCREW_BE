@@ -1,5 +1,7 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User/user.models.js";
+import Doctor from "../models/User/doctor.models.js";
+import Payment from "../models/payment.models.js";
 import { verifyEmail } from "../utils/sendEmail.js";
 import { generateToken } from "../middlewares/auth.js";
 import mongoose from "mongoose";
@@ -172,6 +174,7 @@ export const getMyProfile = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 // get user by id
 export const getUserById = async (req, res) => {
   try {
@@ -212,5 +215,389 @@ export const getAllUsers = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+//Update user profile (Admin only)
+export const updateUserProfile = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { username, email, phone, dateOfBirth, description } = req.body;
+
+    // Check if user has admin role
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Chỉ admin mới có quyền cập nhật hồ sơ người dùng" });
+    }
+
+    // Validate required fields
+    if (!username || !email || !phone || !dateOfBirth) {
+      return res
+        .status(400)
+        .json({ message: "Vui lòng nhập đầy đủ thông tin" });
+    }
+
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    // Update user details
+    user.username = username;
+    user.email = email;
+    user.phone = phone;
+    user.dateOfBirth = dateOfBirth;
+    user.description = description;
+
+    // Save updated user
+    await user.save();
+
+    res.status(200).json({
+      message: "Cập nhật hồ sơ thành công",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        dateOfBirth: user.dateOfBirth,
+        description: user.description,
+        role: user.role,
+        balance: user.balance,
+        avatar: user.avatar,
+        isVerified: user.isVerified,
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+}
+
+// Delete user account (Admin only)
+export const deleteUserAccount = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Check if user has admin role
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Chỉ admin mới có quyền xóa tài khoản người dùng" });
+    }
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "ID người dùng không hợp lệ." });
+    }
+
+    // Find and delete user
+    const user = await User.findByIdAndUpdate(
+      userId, 
+      { isDeleted: true }, 
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại." });
+    }
+    
+    res.status(200).json({ message: "Tài khoản người dùng đã bị xóa thành công." });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Recharge balance (Create payment)
+export const rechargeBalance = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { amount, description = "Nạp tiền vào tài khoản" } = req.body;
+
+    // Validate input
+    if (!amount) {
+      return res.status(400).json({
+        message: "Vui lòng nhập số tiền cần nạp",
+      });
+    }
+
+    // Validate amount (minimum 2000 VND for PayOS)
+    if (amount < 2000) {
+      return res.status(400).json({
+        message: "Số tiền tối thiểu là 2,000 VND",
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    // Redirect to payment creation with modified request
+    req.body = { amount, description };
+    
+    // Forward to payment controller
+    const { createPayment } = await import("./payment.controllers.js");
+    return createPayment(req, res);
+    
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi nạp tiền",
+      error: error.message 
+    });
+  }
+};
+
+// Get user balance
+export const getBalance = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Find user
+    const user = await User.findById(userId).select("username balance");
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    res.status(200).json({
+      message: "Lấy số dư thành công",
+      balance: user.balance,
+      username: user.username,
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi lấy số dư",
+      error: error.message 
+    });
+  }
+};
+
+// Get user's payment transactions
+export const getMyTransactions = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { page = 1, limit = 10, status } = req.query;
+
+    // Build query
+    const query = { userId };
+    if (status) {
+      query.status = status;
+    }
+
+    // Pagination
+    const options = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { createdAt: -1 },
+    };
+
+    // Get payments
+    const payments = await Payment.find(query)
+      .sort(options.sort)
+      .limit(options.limit * 1)
+      .skip((options.page - 1) * options.limit)
+      .select("orderCode amount description status paidAt cancelledAt expiredAt createdAt");
+
+    const totalPayments = await Payment.countDocuments(query);
+
+    res.status(200).json({
+      message: "Lấy lịch sử giao dịch thành công",
+      transactions: payments,
+      pagination: {
+        currentPage: options.page,
+        totalPages: Math.ceil(totalPayments / options.limit),
+        totalTransactions: totalPayments,
+        limit: options.limit,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi lấy lịch sử giao dịch",
+      error: error.message 
+    });
+  }
+};
+
+// Approve Doctor account (Admin only)
+export const approveDoctorAccount = async (req, res) => {
+  try {
+    const doctorId = req.params.id;
+
+    // Check if user has admin role
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Chỉ admin mới có quyền phê duyệt tài khoản bác sĩ" });
+    }
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ message: "ID bác sĩ không hợp lệ." });
+    }
+
+    // Find doctor and update status
+    const doctor = await Doctor.findByIdAndUpdate(
+      doctorId,
+      { 
+        isVerified: true,
+        doctorApplicationStatus: "accepted",
+        rejectionMessage: null // Clear any previous rejection message
+      },
+      { new: true }
+    );
+    
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
+    }
+
+    res.status(200).json({
+      message: "Tài khoản bác sĩ đã được phê duyệt thành công.",
+      doctor: {
+        id: doctor._id,
+        fullName: doctor.fullName,
+        email: doctor.email,
+        doctorType: doctor.doctorType,
+        workplace: doctor.workplace,
+        doctorApplicationStatus: doctor.doctorApplicationStatus,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi phê duyệt tài khoản bác sĩ",
+      error: error.message
+    });
+  }
+};
+
+// Reject Doctor account (Admin only)
+export const rejectDoctorAccount = async (req, res) => {
+  try {
+    const doctorId = req.params.id;
+    const { rejectionMessage } = req.body;
+
+    // Check if user has admin role
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Chỉ admin mới có quyền từ chối tài khoản bác sĩ" });
+    }
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ message: "ID bác sĩ không hợp lệ." });
+    }
+
+    // Find doctor and update status
+    const doctor = await Doctor.findByIdAndUpdate(
+      doctorId,
+      { 
+        isVerified: false,
+        doctorApplicationStatus: "rejected",
+        rejectionMessage: rejectionMessage || "Tài khoản bác sĩ bị từ chối."
+      },
+      { new: true }
+    );
+    
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
+    }
+
+    res.status(200).json({
+      message: "Tài khoản bác sĩ đã bị từ chối thành công.",
+      doctor: {
+        id: doctor._id,
+        fullName: doctor.fullName,
+        email: doctor.email,
+        doctorType: doctor.doctorType,
+        workplace: doctor.workplace,
+        doctorApplicationStatus: doctor.doctorApplicationStatus,
+        rejectionMessage: doctor.rejectionMessage,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi từ chối tài khoản bác sĩ",
+      error: error.message 
+    });
+  }
+};
+
+// Get pending doctor applications (Admin only)
+export const getPendingDoctorApplications = async (req, res) => {
+  try {
+    // Check if user has admin role
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Chỉ admin mới có quyền xem đơn đăng ký bác sĩ" });
+    }
+
+    // Get all pending doctor applications
+    const pendingDoctors = await Doctor.find({ 
+      doctorApplicationStatus: "pending" 
+    }).select(
+      "-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires"
+    ).sort({ createdAt: -1 });
+
+    const totalPending = await Doctor.countDocuments({ 
+      doctorApplicationStatus: "pending" 
+    });
+
+    res.status(200).json({
+      message: `Có ${totalPending} đơn đăng ký bác sĩ chờ duyệt`,
+      pendingDoctors,
+      totalPending,
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi lấy danh sách đơn đăng ký bác sĩ",
+      error: error.message 
+    });
+  }
+};
+
+// Get all doctor applications by status (Admin only)
+export const getDoctorApplicationsByStatus = async (req, res) => {
+  try {
+    const { status } = req.params; // pending, accepted, rejected
+    
+    // Check if user has admin role
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Chỉ admin mới có quyền xem đơn đăng ký bác sĩ" });
+    }
+
+    // Validate status
+    const validStatuses = ["pending", "accepted", "rejected"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        message: "Trạng thái không hợp lệ. Chỉ chấp nhận: pending, accepted, rejected" 
+      });
+    }
+
+    // Get doctors by status
+    const doctors = await Doctor.find({ 
+      doctorApplicationStatus: status 
+    }).select(
+      "-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires"
+    ).sort({ createdAt: -1 });
+
+    const totalDoctors = await Doctor.countDocuments({ 
+      doctorApplicationStatus: status 
+    });
+
+    res.status(200).json({
+      message: `Có ${totalDoctors} bác sĩ với trạng thái ${status}`,
+      doctors,
+      totalDoctors,
+      status,
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi lấy danh sách bác sĩ theo trạng thái",
+      error: error.message 
+    });
   }
 };
