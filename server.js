@@ -11,7 +11,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 8080;
+const port = process.env.DOMAIN_BE || "https://visionarycrew-be.vercel.app"
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,7 +38,7 @@ const startServer = async () => {
   try {
     await connectDB();
     app.listen(port, () => {
-      console.log(`🚀 Server is running on http://localhost:${port}`);
+      console.log(`🚀 Server is running on ${port}` );
     });
   } catch (err) {
     console.error('❌ Failed to start server:', err);
