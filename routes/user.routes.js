@@ -10,11 +10,7 @@ import {
   deleteUserAccount,
   rechargeBalance,
   getBalance,
-  getMyTransactions,
-  approveDoctorAccount,
-  rejectDoctorAccount,
-  getPendingDoctorApplications,
-  getDoctorApplicationsByStatus,
+  getMyTransactions
 } from "../controllers/user.controllers.js";
 import { admin, protectRouter } from "../middlewares/auth.js";
 
@@ -29,11 +25,6 @@ router.get("/", protectRouter, admin, getAllUsers);
 router.put("/profile", protectRouter, admin, updateUserProfile);
 router.delete("/account", protectRouter, admin, deleteUserAccount);
 
-// Doctor management routes (Admin only)
-router.get("/doctors/pending", protectRouter, admin, getPendingDoctorApplications);
-router.get("/doctors/status/:status", protectRouter, admin, getDoctorApplicationsByStatus);
-router.post("/doctors/approve/:id", protectRouter, admin, approveDoctorAccount);
-router.post("/doctors/reject/:id", protectRouter, admin, rejectDoctorAccount);
 
 // Payment related routes
 router.post("/recharge", protectRouter, rechargeBalance);

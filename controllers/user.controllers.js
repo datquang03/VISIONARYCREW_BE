@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User/user.models.js";
-import Doctor from "../models/User/doctor.models.js";
 import Payment from "../models/payment.models.js";
 import { verifyEmail } from "../utils/sendEmail.js";
 import { generateToken } from "../middlewares/auth.js";
@@ -137,11 +136,6 @@ export const getMyProfile = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Kiểm tra ObjectId hợp lệ
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: "ID người dùng không hợp lệ." });
-    }
-
     // Tìm người dùng
     const user = await User.findById(userId).select(
       " -password -isVerified -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail -tempEmailExpires"
@@ -159,7 +153,6 @@ export const getMyProfile = async (req, res) => {
         phone: user.phone,
         dateOfBirth: user.dateOfBirth,
         role: user.role,
-        balance: user.balance,
         avatar: user.avatar,
         description: user.description,
         likedBlogs: user.likedBlogs,
@@ -419,185 +412,4 @@ export const getMyTransactions = async (req, res) => {
   }
 };
 
-// Approve Doctor account (Admin only)
-export const approveDoctorAccount = async (req, res) => {
-  try {
-    const doctorId = req.params.id;
 
-    // Check if user has admin role
-    if (req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ message: "Chỉ admin mới có quyền phê duyệt tài khoản bác sĩ" });
-    }
-
-    // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-      return res.status(400).json({ message: "ID bác sĩ không hợp lệ." });
-    }
-
-    // Find doctor and update status
-    const doctor = await Doctor.findByIdAndUpdate(
-      doctorId,
-      { 
-        isVerified: true,
-        doctorApplicationStatus: "accepted",
-        rejectionMessage: null // Clear any previous rejection message
-      },
-      { new: true }
-    );
-    
-    if (!doctor) {
-      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
-    }
-
-    res.status(200).json({
-      message: "Tài khoản bác sĩ đã được phê duyệt thành công.",
-      doctor: {
-        id: doctor._id,
-        fullName: doctor.fullName,
-        email: doctor.email,
-        doctorType: doctor.doctorType,
-        workplace: doctor.workplace,
-        doctorApplicationStatus: doctor.doctorApplicationStatus,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Lỗi phê duyệt tài khoản bác sĩ",
-      error: error.message
-    });
-  }
-};
-
-// Reject Doctor account (Admin only)
-export const rejectDoctorAccount = async (req, res) => {
-  try {
-    const doctorId = req.params.id;
-    const { rejectionMessage } = req.body;
-
-    // Check if user has admin role
-    if (req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ message: "Chỉ admin mới có quyền từ chối tài khoản bác sĩ" });
-    }
-
-    // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-      return res.status(400).json({ message: "ID bác sĩ không hợp lệ." });
-    }
-
-    // Find doctor and update status
-    const doctor = await Doctor.findByIdAndUpdate(
-      doctorId,
-      { 
-        isVerified: false,
-        doctorApplicationStatus: "rejected",
-        rejectionMessage: rejectionMessage || "Tài khoản bác sĩ bị từ chối."
-      },
-      { new: true }
-    );
-    
-    if (!doctor) {
-      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
-    }
-
-    res.status(200).json({
-      message: "Tài khoản bác sĩ đã bị từ chối thành công.",
-      doctor: {
-        id: doctor._id,
-        fullName: doctor.fullName,
-        email: doctor.email,
-        doctorType: doctor.doctorType,
-        workplace: doctor.workplace,
-        doctorApplicationStatus: doctor.doctorApplicationStatus,
-        rejectionMessage: doctor.rejectionMessage,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Lỗi từ chối tài khoản bác sĩ",
-      error: error.message 
-    });
-  }
-};
-
-// Get pending doctor applications (Admin only)
-export const getPendingDoctorApplications = async (req, res) => {
-  try {
-    // Check if user has admin role
-    if (req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ message: "Chỉ admin mới có quyền xem đơn đăng ký bác sĩ" });
-    }
-
-    // Get all pending doctor applications
-    const pendingDoctors = await Doctor.find({ 
-      doctorApplicationStatus: "pending" 
-    }).select(
-      "-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires"
-    ).sort({ createdAt: -1 });
-
-    const totalPending = await Doctor.countDocuments({ 
-      doctorApplicationStatus: "pending" 
-    });
-
-    res.status(200).json({
-      message: `Có ${totalPending} đơn đăng ký bác sĩ chờ duyệt`,
-      pendingDoctors,
-      totalPending,
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Lỗi lấy danh sách đơn đăng ký bác sĩ",
-      error: error.message 
-    });
-  }
-};
-
-// Get all doctor applications by status (Admin only)
-export const getDoctorApplicationsByStatus = async (req, res) => {
-  try {
-    const { status } = req.params; // pending, accepted, rejected
-    
-    // Check if user has admin role
-    if (req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ message: "Chỉ admin mới có quyền xem đơn đăng ký bác sĩ" });
-    }
-
-    // Validate status
-    const validStatuses = ["pending", "accepted", "rejected"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ 
-        message: "Trạng thái không hợp lệ. Chỉ chấp nhận: pending, accepted, rejected" 
-      });
-    }
-
-    // Get doctors by status
-    const doctors = await Doctor.find({ 
-      doctorApplicationStatus: status 
-    }).select(
-      "-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires"
-    ).sort({ createdAt: -1 });
-
-    const totalDoctors = await Doctor.countDocuments({ 
-      doctorApplicationStatus: status 
-    });
-
-    res.status(200).json({
-      message: `Có ${totalDoctors} bác sĩ với trạng thái ${status}`,
-      doctors,
-      totalDoctors,
-      status,
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Lỗi lấy danh sách bác sĩ theo trạng thái",
-      error: error.message 
-    });
-  }
-};
