@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User/user.models.js";
-import Doctor from "../models/User/doctor.models.js";
 import Payment from "../models/payment.models.js";
 import { verifyEmail } from "../utils/sendEmail.js";
 import { generateToken } from "../middlewares/auth.js";
@@ -137,11 +136,6 @@ export const getMyProfile = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Kiểm tra ObjectId hợp lệ
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: "ID người dùng không hợp lệ." });
-    }
-
     // Tìm người dùng
     const user = await User.findById(userId).select(
       " -password -isVerified -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail -tempEmailExpires"
@@ -159,7 +153,6 @@ export const getMyProfile = async (req, res) => {
         phone: user.phone,
         dateOfBirth: user.dateOfBirth,
         role: user.role,
-        balance: user.balance,
         avatar: user.avatar,
         description: user.description,
         likedBlogs: user.likedBlogs,

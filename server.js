@@ -19,7 +19,7 @@ const __dirname = path.dirname(__filename);
 // CORS configuration
 const corsOptions = {
   origin: [
-    'http://localhost:3000', // Allow local frontend (adjust port if needed, e.g., 5173 for Vite)
+    'http://localhost:5173', // Allow local frontend (adjust port if needed, e.g., 5173 for Vite)
     process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app' // Allow backend domain
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

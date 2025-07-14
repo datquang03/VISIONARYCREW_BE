@@ -4,6 +4,7 @@ import { sendEmailDoctorApplication } from "../utils/sendEmailDoctorApplication.
 import { generateToken } from "../middlewares/auth.js";
 import mongoose from "mongoose";
 import { uploadImage, uploadMultipleImages } from "../config/cloudinary.js";
+import { stat } from "fs";
 
 // Register a new doctor with avatar and certification images
 export const registerDoctor = async (req, res) => {
@@ -302,6 +303,7 @@ export const getMyProfile = async (req, res) => {
         role: doctor.role,
         balance: doctor.balance,
         avatar: doctor.avatar,
+        status: doctor.status,
         likedBlogs: doctor.likedBlogs,
         conversations: doctor.conversations,
         isVerified: doctor.isVerified,
