@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// Send email for doctor application
-export const sendEmailDoctorApplication = async (doctor) => {
+// Send email for doctor application status
+export const sendEmailDoctorApplication = async (doctor, status, rejectionMessage = null) => {
   try {
     // Create transporter using Gmail SMTP
     const transporter = nodemailer.createTransport({
@@ -15,9 +15,19 @@ export const sendEmailDoctorApplication = async (doctor) => {
       },
     });
 
-    // Email options
-    const subject = "Visionary Crew - Đăng ký bác sĩ";
-    const text = `Xin chào ${doctor.fullName},\n\nĐơn đăng ký bác sĩ của bạn đã được gửi thành công. Chúng tôi sẽ xem xét và thông báo kết quả (chấp nhận hoặc từ chối) qua email này trong thời gian sớm nhất.\n\nCảm ơn bạn đã tham gia!`;
+    // Define email content based on status
+    let subject, text;
+    if (status === "accepted") {
+      subject = "Visionary Crew - Đơn đăng ký bác sĩ được chấp nhận";
+      text = `Xin chào ${doctor.fullName},\n\nChúc mừng bạn! Đơn đăng ký bác sĩ của bạn đã được chấp nhận. Bạn có thể đăng nhập và bắt đầu sử dụng tài khoản bác sĩ của mình.\n\nCảm ơn bạn đã tham gia Visionary Crew!`;
+    } else if (status === "rejected") {
+      subject = "Visionary Crew - Đơn đăng ký bác sĩ bị từ chối";
+      text = `Xin chào ${doctor.fullName},\n\nRất tiếc, đơn đăng ký bác sĩ của bạn đã bị từ chối. Lý do: ${rejectionMessage || "Không được cung cấp"}.\n\nVui lòng liên hệ với chúng tôi nếu bạn cần thêm thông tin. Cảm ơn bạn đã quan tâm đến Visionary Crew!`;
+    } else {
+      subject = "Visionary Crew - Đăng ký bác sĩ";
+      text = `Xin chào ${doctor.fullName},\n\nĐơn đăng ký bác sĩ của bạn đã được gửi thành công. Chúng tôi sẽ xem xét và thông báo kết quả (chấp nhận hoặc từ chối) qua email này trong thời gian sớm nhất.\n\nCảm ơn bạn đã tham gia!`;
+    }
+
     const mailOptions = {
       from: `"Visionary Crew" <${process.env.EMAIL_USER}>`,
       to: doctor.email,
@@ -28,9 +38,9 @@ export const sendEmailDoctorApplication = async (doctor) => {
 
     // Send email
     await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${doctor.email}`);
+    console.log(`Email sent to ${doctor.email} with status: ${status}`);
   } catch (error) {
-    console.error("Error sending doctor application email:", error.message);
-    throw new Error("Gửi email đăng ký bác sĩ thất bại");
+    console.error(`Error sending doctor application email (${status}):`, error.message);
+    throw new Error(`Gửi email ${status} đăng ký bác sĩ thất bại`);
   }
 };

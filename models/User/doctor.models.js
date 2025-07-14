@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const doctocrSchema = new mongoose.Schema(
+const doctorSchema = new mongoose.Schema(
   {
     username: {
       type: String,
@@ -40,10 +40,6 @@ const doctocrSchema = new mongoose.Schema(
       type: String,
       enum: ["doctor"],
     },
-    balance: {
-      type: Number,
-      default: 0,
-    },
     isVerified: {
       type: Boolean,
       default: false,
@@ -81,7 +77,7 @@ const doctocrSchema = new mongoose.Schema(
         ref: "Message",
       },
     ],
-     // Doctor-specific fields
+    // Doctor-specific fields
     doctorType: {
       type: String,
       enum: ["general", "cardiologist", "dermatologist", "pediatrician", "other"],
@@ -167,5 +163,6 @@ const doctocrSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-const Doctor = mongoose.model("Doctor", doctocrSchema);
+
+const Doctor = mongoose.model("Doctor", doctorSchema);
 export default Doctor;
