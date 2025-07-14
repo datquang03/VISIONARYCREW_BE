@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
-const userSchema = new mongoose.Schema({
+const userSchema = new mongoose.Schema(
+  {
     username: {
       type: String,
       required: true,
@@ -44,6 +45,17 @@ const userSchema = new mongoose.Schema({
       type: Boolean,
       default: false,
     },
+    isDeleted: {
+      // Added for soft delete
+      type: Boolean,
+      default: false,
+    },
+    balance: {
+      // Added for user balance
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     verifyToken: {
       type: String,
     },
@@ -65,8 +77,19 @@ const userSchema = new mongoose.Schema({
     tempEmail: {
       type: String,
     },
+    tempEmailExpires: {
+      // Added to match exclusion in getMyProfile
+      type: Date,
+    },
     likedBlogs: [
       {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Blog",
+      },
+    ],
+    savedBlogs: [
+      {
+        // Added to match getMyProfile
         type: mongoose.Schema.Types.ObjectId,
         ref: "Blog",
       },
@@ -83,8 +106,17 @@ const userSchema = new mongoose.Schema({
         ref: "MedicalRecord",
       },
     ],
-}, {
-  timestamps: true,
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Ensure queries exclude deleted users by default
+userSchema.pre(/^find/, function (next) {
+  this.find({ isDeleted: { $ne: true } });
+  next();
 });
+
 const User = mongoose.model("User", userSchema);
 export default User;
