@@ -51,7 +51,30 @@ export const handleDoctorApplication = async (req, res) => {
 // Login doctor
 export const login = async (req, res) => {
   try {
-    // ... unchanged code
+    const { username, password } = req.body;
+
+    // Find doctor
+    const doctor = await Doctor.findOne({ username });
+    if (!doctor) {
+      return res
+        .status(400)
+        .json({ message: "Không tìm thấy tên tài khoản bác sĩ" });
+    }
+
+    // Check if email is verified
+    if (!doctor.isVerified) {
+      return res.status(403).json({
+        message: "Email chưa được xác thực. Vui lòng kiểm tra email để xác thực.",
+      });
+    }
+    // Check password
+    const isMatch = await bcrypt.compare(password, doctor.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Sai mật khâu" });
+    }
+    // Generate token
+    const token = generateToken(doctor._id);
+    
     res.status(200).json({
       message: "Đăng nhập thành công",
       doctor: {
