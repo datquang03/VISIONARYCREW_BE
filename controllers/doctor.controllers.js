@@ -6,15 +6,85 @@ import mongoose from "mongoose";
 import { uploadImage, uploadMultipleImages } from "../config/cloudinary.js";
 import { formatDate } from "../utils/dateFormat.js";
 
-// All route handlers updated to use formatDate where appropriate
-
 // Register a new doctor
 export const registerDoctor = async (req, res) => {
   try {
-    // ... unchanged code
-    return res.status(200).json({
-      message: "Đăng ký bác sĩ thành công. Vui lòng chờ xét duyệt.",
+    const {
+      username, email, phone, dateOfBirth, password,
+      fullName, address, doctorType,
+      certifications, education, workExperience,
+      workplace, description,
+    } = req.body;
+
+    if (!username || !email || !phone || !dateOfBirth || !password || !fullName || !address || !doctorType) {
+      return res.status(400).json({ message: "Vui lòng nhập đầy đủ thông tin bắt buộc" });
+    }
+
+    const existingDoctor = await Doctor.findOne({
+      $or: [{ email }, { phone }, { username }],
     });
+    if (existingDoctor) {
+      return res.status(400).json({
+        message: `Bác sĩ với ${
+          existingDoctor.email === email
+            ? "email"
+            : existingDoctor.phone === phone
+              ? "số điện thoại"
+              : "tên đăng nhập"
+        } đã tồn tại`,
+      });
+    }
+
+    let avatarUrl = null;
+    if (req.files?.length > 0) {
+      const avatarFile = req.files.find((file) => file.fieldname === "avatar");
+      if (avatarFile) {
+        avatarUrl = await uploadImage(avatarFile.buffer, "doctor_avatars");
+      }
+    }
+
+    let parsedCertifications = [];
+    try {
+      parsedCertifications = certifications ? JSON.parse(certifications) : [];
+    } catch (e) { console.error("Certification parse error", e); }
+
+    const certFiles = req.files?.filter(f => f.fieldname === "certificationImages") || [];
+    if (certFiles.length > 0) {
+      const urls = await uploadMultipleImages(certFiles.map(f => f.buffer), "doctor_certifications");
+      parsedCertifications = parsedCertifications.map((cert, idx) => ({
+        ...cert,
+        url: urls[idx] || cert.url,
+        uploadedAt: cert.uploadedAt || new Date(),
+      }));
+    }
+
+    let parsedEducation = [];
+    let parsedWorkExperience = [];
+    try { parsedEducation = education ? JSON.parse(education) : []; } catch (e) {}
+    try { parsedWorkExperience = workExperience ? JSON.parse(workExperience) : []; } catch (e) {}
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const doctorRegisterId = new mongoose.Types.ObjectId().toString();
+
+    const doctor = new Doctor({
+      username, email, phone, dateOfBirth, password: hashedPassword,
+      fullName, address, doctorType,
+      certifications: parsedCertifications,
+      education: parsedEducation,
+      workExperience: parsedWorkExperience,
+      workplace: workplace || null,
+      description: description || null,
+      role: "doctor",
+      isVerified: false,
+      doctorApplicationStatus: "pending",
+      doctorRegisterId,
+      avatar: avatarUrl,
+    });
+
+    await doctor.save();
+    await sendEmailDoctorApplication(doctor, "pending");
+    return res.status(200).json({ message: "Đăng ký bác sĩ thành công. Vui lòng chờ xét duyệt." });
+
   } catch (error) {
     console.error("Doctor registration error:", error);
     return res.status(500).json({ message: error.message });
@@ -24,58 +94,113 @@ export const registerDoctor = async (req, res) => {
 // Re-register a doctor
 export const reRegisterDoctor = async (req, res) => {
   try {
-    // ... unchanged code
-    return res.status(200).json({
-      message: "Đăng ký lại thành công. Vui lòng chờ xét duyệt.",
-    });
+    const {
+      doctorId, fullName, address, doctorType,
+      certifications, education, workExperience,
+      workplace, description,
+    } = req.body;
+
+    if (!doctorId || !fullName || !address || !doctorType) {
+      return res.status(400).json({ message: "Vui lòng cung cấp đầy đủ thông tin bắt buộc để đăng ký lại." });
+    }
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
+
+    if (doctor.doctorApplicationStatus !== 'rejected') {
+      return res.status(400).json({
+        message: `Chỉ những bác sĩ bị từ chối mới có thể đăng ký lại. Trạng thái hiện tại: ${doctor.doctorApplicationStatus}`,
+      });
+    }
+
+    if (req.files?.length > 0) {
+      const avatarFile = req.files.find((file) => file.fieldname === "avatar");
+      if (avatarFile) doctor.avatar = await uploadImage(avatarFile.buffer, "doctor_avatars");
+    }
+
+    let parsedCertifications = [];
+    try {
+      parsedCertifications = certifications ? JSON.parse(certifications) : [];
+    } catch (e) {}
+
+    const certFiles = req.files?.filter(f => f.fieldname === "certificationImages") || [];
+    if (certFiles.length > 0) {
+      const urls = await uploadMultipleImages(certFiles.map(f => f.buffer), "doctor_certifications");
+      parsedCertifications = parsedCertifications.map((cert, idx) => ({
+        ...cert,
+        url: urls[idx] || cert.url,
+        uploadedAt: cert.uploadedAt || new Date(),
+      }));
+    }
+
+    let parsedEducation = [];
+    let parsedWorkExperience = [];
+    try { parsedEducation = education ? JSON.parse(education) : []; } catch (e) {}
+    try { parsedWorkExperience = workExperience ? JSON.parse(workExperience) : []; } catch (e) {}
+
+    doctor.fullName = fullName;
+    doctor.address = address;
+    doctor.doctorType = doctorType;
+    doctor.certifications = parsedCertifications;
+    doctor.education = parsedEducation;
+    doctor.workExperience = parsedWorkExperience;
+    doctor.workplace = workplace || null;
+    doctor.description = description || null;
+    doctor.doctorApplicationStatus = "pending";
+    doctor.rejectionMessage = null;
+    doctor.isVerified = false;
+
+    await doctor.save();
+    await sendEmailDoctorApplication(doctor, "pending");
+
+    return res.status(200).json({ message: "Đăng ký lại thành công. Vui lòng chờ xét duyệt." });
   } catch (error) {
     console.error("Re-register doctor error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Handle doctor application
+// Accept / Reject
 export const handleDoctorApplication = async (req, res) => {
   try {
-    // ... unchanged code
-    res.status(200).json({
-      message: `Đã ${status === "accepted" ? "chấp nhận" : "từ chối"} đơn đăng ký bác sĩ`,
-      doctorId,
-    });
+    const { doctorId, status, rejectionMessage } = req.body;
+
+    if (!doctorId || !status) return res.status(400).json({ message: "Thiếu thông tin yêu cầu." });
+    if (status === "rejected" && !rejectionMessage) return res.status(400).json({ message: "Cần rejectionMessage khi từ chối." });
+    if (!["accepted", "rejected"].includes(status)) return res.status(400).json({ message: "Status phải là 'accepted' hoặc 'rejected'" });
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
+    if (doctor.doctorApplicationStatus !== "pending") {
+      return res.status(400).json({ message: `Trạng thái hiện tại: ${doctor.doctorApplicationStatus}` });
+    }
+
+    doctor.doctorApplicationStatus = status;
+    doctor.isVerified = status === "accepted";
+    doctor.rejectionMessage = status === "rejected" ? rejectionMessage : null;
+
+    await doctor.save();
+    await sendEmailDoctorApplication(doctor, status, rejectionMessage);
+
+    return res.status(200).json({ message: `Đã ${status === "accepted" ? "chấp nhận" : "từ chối"} đơn đăng ký bác sĩ.` });
   } catch (error) {
-    console.error("Handle doctor application error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Login doctor
+// Login
 export const login = async (req, res) => {
   try {
     const { username, password } = req.body;
-
-    // Find doctor
     const doctor = await Doctor.findOne({ username });
-    if (!doctor) {
-      return res
-        .status(400)
-        .json({ message: "Không tìm thấy tên tài khoản bác sĩ" });
-    }
+    if (!doctor) return res.status(400).json({ message: "Tài khoản không tồn tại." });
 
-    // Check if email is verified
-    if (!doctor.isVerified) {
-      return res.status(403).json({
-        message: "Email chưa được xác thực. Vui lòng kiểm tra email để xác thực.",
-      });
-    }
-    // Check password
     const isMatch = await bcrypt.compare(password, doctor.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Sai mật khâu" });
-    }
-    // Generate token
+    if (!isMatch) return res.status(400).json({ message: "Sai mật khẩu." });
+
     const token = generateToken(doctor._id);
-    
-    res.status(200).json({
+
+    return res.status(200).json({
       message: "Đăng nhập thành công",
       doctor: {
         id: doctor._id,
@@ -97,31 +222,11 @@ export const login = async (req, res) => {
   }
 };
 
-// Get profile
+// Get my profile
 export const getMyProfile = async (req, res) => {
   try {
-    const doctor = await Doctor.findById(req.doctor._id).select("-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail");
-    if (!doctor) return res.status(404).json({ message: "Bác sĩ không tồn tại." });
-
-    res.status(200).json({
-      message: "Lấy thông tin hồ sơ bác sĩ thành công.",
-      doctor: {
-        ...doctor.toObject(),
-        dateOfBirth: doctor.dateOfBirth ? formatDate(doctor.dateOfBirth) : null,
-        createdAt: formatDate(doctor.createdAt),
-        updatedAt: formatDate(doctor.updatedAt),
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// Get doctor by ID
-export const getDoctorById = async (req, res) => {
-  try {
-    const doctor = await Doctor.findById(req.params.id).select("-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail -balance");
-    if (!doctor) return res.status(404).json({ message: "Bác sĩ không tồn tại" });
+    const doctor = await Doctor.findById(req.doctor._id).select("-password -resetPasswordCode -verifyToken -tempEmail");
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
 
     res.status(200).json({
       message: "Lấy thông tin bác sĩ thành công",
@@ -137,47 +242,61 @@ export const getDoctorById = async (req, res) => {
   }
 };
 
-// Get all doctors
+// Get all
 export const getAllDoctors = async (req, res) => {
   try {
-    const doctors = await Doctor.find().select("-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail").sort({ createdAt: -1 });
-    if (!doctors.length) return res.status(201).json({ message: "Không có bác sĩ nào" });
-
+    const doctors = await Doctor.find().sort({ createdAt: -1 });
     res.status(200).json({
-      message: `Có tổng ${doctors.length} bác sĩ`,
-      doctors: doctors.map(d => ({
+      message: `Tổng cộng ${doctors.length} bác sĩ`,
+      doctors: doctors.map((d) => ({
         ...d.toObject(),
         dateOfBirth: d.dateOfBirth ? formatDate(d.dateOfBirth) : null,
         createdAt: formatDate(d.createdAt),
         updatedAt: formatDate(d.updatedAt),
       })),
-      totalDoctors: doctors.length,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get pending doctors
-export const getPendingDoctor = async (req, res) => {
+// Get by register ID
+export const getDoctorByRegisterId = async (req, res) => {
   try {
-    const pendingDoctors = await Doctor.find({ doctorApplicationStatus: "pending" }).sort({ createdAt: -1 });
-    if (!pendingDoctors.length) return res.status(201).json({ message: "Không có bác sĩ nào đang chờ xét duyệt" });
+    const doctor = await Doctor.findOne({ doctorRegisterId: req.params.doctorId });
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy đơn đăng ký bác sĩ với mã này." });
 
     res.status(200).json({
-      message: `Có tổng ${pendingDoctors.length} bác sĩ đang chờ xét duyệt`,
-      pendingDoctors: pendingDoctors.map(d => ({
+      message: "Lấy thông tin thành công",
+      doctorId: doctor._id,
+      status: doctor.doctorApplicationStatus,
+      rejectionMessage: doctor.rejectionMessage || null,
+      submittedAt: formatDate(doctor.createdAt),
+      updatedAt: formatDate(doctor.updatedAt),
+      fullName: doctor.fullName,
+      avatar: doctor.avatar,
+      doctorType: doctor.doctorType,
+      workplace: doctor.workplace,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Get pending
+export const getPendingDoctor = async (req, res) => {
+  try {
+    const doctors = await Doctor.find({ doctorApplicationStatus: "pending" });
+    res.status(200).json({
+      message: `Có tổng ${doctors.length} bác sĩ đang chờ xét duyệt`,
+      pendingDoctors: doctors.map((d) => ({
         id: d._id,
-        username: d.username,
-        email: d.email,
         fullName: d.fullName,
-        address: d.address,
-        phone: d.phone,
-        dateOfBirth: d.dateOfBirth ? formatDate(d.dateOfBirth) : null,
         avatar: d.avatar,
         doctorType: d.doctorType,
+        phone: d.phone,
+        dateOfBirth: d.dateOfBirth ? formatDate(d.dateOfBirth) : null,
         workplace: d.workplace,
-        certifications: d.certifications,
         doctorRegisterId: d.doctorRegisterId,
         doctorApplicationStatus: d.doctorApplicationStatus,
         rejectionMessage: d.rejectionMessage || null,
@@ -190,23 +309,25 @@ export const getPendingDoctor = async (req, res) => {
   }
 };
 
-// Get doctor by register ID
-export const getDoctorByRegisterId = async (req, res) => {
+// Get doctor by ID
+export const getDoctorById = async (req, res) => {
   try {
-    const doctor = await Doctor.findOne({ doctorRegisterId: req.params.doctorId }).select("-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail -balance");
-    if (!doctor) return res.status(404).json({ message: "Không tìm thấy đơn đăng ký bác sĩ với mã này." });
+    const doctor = await Doctor.findById(req.params.id).select(
+      "-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail"
+    );
+
+    if (!doctor) {
+      return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
+    }
 
     res.status(200).json({
-      message: "Lấy thông tin đăng ký bác sĩ thành công",
-      doctorId: doctor._id,
-      status: doctor.doctorApplicationStatus,
-      rejectionMessage: doctor.rejectionMessage || null,
-      submittedAt: formatDate(doctor.createdAt),
-      updatedAt: formatDate(doctor.updatedAt),
-      fullName: doctor.fullName,
-      avatar: doctor.avatar,
-      doctorType: doctor.doctorType,
-      workplace: doctor.workplace,
+      message: "Lấy thông tin bác sĩ thành công",
+      doctor: {
+        ...doctor.toObject(),
+        dateOfBirth: doctor.dateOfBirth ? formatDate(doctor.dateOfBirth) : null,
+        createdAt: formatDate(doctor.createdAt),
+        updatedAt: formatDate(doctor.updatedAt),
+      },
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
