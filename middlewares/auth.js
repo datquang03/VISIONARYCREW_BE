@@ -59,3 +59,23 @@ export const restrictToAdminOrDoctor = asyncHandler(async (req, res, next) => {
     res.status(403).json({ message: "Yêu cầu quyền admin hoặc bác sĩ" });
   }
 });
+
+export const allowOnlyAcceptedDoctor = (req, res, next) => {
+  if (req.user?.role === "doctor") {
+    if (req.user.doctorApplicationStatus === "accepted") return next();
+    return res.status(403).json({
+      message: "Tài khoản bác sĩ chưa được chấp nhận. Vui lòng chờ xét duyệt hoặc đăng ký lại."
+    });
+  }
+  next();
+};
+
+export const allowOnlyPendingOrRejectedDoctor = (req, res, next) => {
+  if (req.user?.role === "doctor") {
+    if (["pending", "rejected"].includes(req.user.doctorApplicationStatus)) return next();
+    return res.status(403).json({
+      message: "Tài khoản bác sĩ đã được chấp nhận. Không thể thực hiện hành động này."
+    });
+  }
+  next();
+};
