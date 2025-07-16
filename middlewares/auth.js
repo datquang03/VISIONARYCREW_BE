@@ -72,26 +72,7 @@ export const admin = asyncHandler(async (req, res, next) => {
   }
 });
 
-// Doctor middleware (Doctor model)
-export const doctor = asyncHandler(async (req, res, next) => {
-  if (req.doctor && req.doctor.role === "doctor") {
-    next();
-  } else {
-    res.status(403).json({ message: "Chỉ dành cho bác sĩ" });
-  }
-});
 
-// Admin or Doctor middleware
-export const restrictToAdminOrDoctor = asyncHandler(async (req, res, next) => {
-  if (
-    (req.user && ["admin"].includes(req.user.role)) ||
-    (req.doctor && req.doctor.role === "doctor")
-  ) {
-    next();
-  } else {
-    res.status(403).json({ message: "Yêu cầu quyền admin hoặc bác sĩ" });
-  }
-});
 
 // Allow only accepted doctors (Doctor model)
 export const allowOnlyAcceptedDoctor = asyncHandler(async (req, res, next) => {
