@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -23,7 +24,7 @@ const corsOptions = {
     'http://localhost:5173', // Allow local frontend (adjust port if needed, e.g., 5173 for Vite)
     process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app' // Allow backend domain
   ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Added PATCH
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true // Support cookies or auth headers if needed
 };
