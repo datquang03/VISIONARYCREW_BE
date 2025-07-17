@@ -118,3 +118,43 @@ export const allowOnlyPendingOrRejectedDoctor = asyncHandler(async (req, res, ne
   }
   next();
 });
+
+// Protect router for doctors specifically
+export const protectDoctorRouter = asyncHandler(async (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    try {
+      token = req.headers.authorization.split(" ")[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+      // Import Doctor model dynamically to avoid circular dependency
+      const { default: Doctor } = await import("../models/User/doctor.models.js");
+
+      req.doctor = await Doctor.findById(decoded.id).select("-password");
+      if (!req.doctor) {
+        return res
+          .status(401)
+          .json({ message: "Không tìm thấy bác sĩ với token này" });
+      }
+
+      // Check if doctor is verified
+      if (req.doctor.doctorApplicationStatus !== "accepted") {
+        return res.status(403).json({
+          message: "Tài khoản bác sĩ chưa được xác minh",
+        });
+      }
+
+      next();
+    } catch (error) {
+      console.error("Doctor token verification error:", error);
+      return res.status(401).json({ message: "Token bác sĩ không hợp lệ" });
+    }
+  } else {
+    return res
+      .status(401)
+      .json({ message: "Chưa đăng nhập với tài khoản bác sĩ" });
+  }
+});

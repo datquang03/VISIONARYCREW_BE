@@ -1,58 +1,141 @@
 import payOS from "../config/payos.js";
 import Payment from "../models/payment.models.js";
-import User from "../models/User/user.models.js";
+import Doctor from "../models/User/doctor.models.js";
 import mongoose from "mongoose";
+
+// Package pricing configuration
+const PACKAGE_PRICES = {
+  silver: {
+    1: 99000,   // 1 month
+    3: 279000,  // 3 months (5% discount)
+    6: 534000,  // 6 months (10% discount)
+    12: 1009000 // 12 months (15% discount)
+  },
+  gold: {
+    1: 199000,   // 1 month
+    3: 567000,   // 3 months (5% discount)
+    6: 1074000,  // 6 months (10% discount)
+    12: 2029000  // 12 months (15% discount)
+  },
+  diamond: {
+    1: 299000,   // 1 month
+    3: 854000,   // 3 months (5% discount)
+    6: 1614000,  // 6 months (10% discount)
+    12: 3050000  // 12 months (15% discount)
+  }
+};
+
+// Package benefits configuration
+const PACKAGE_BENEFITS = {
+  free: {
+    scheduleLimit: 0,
+    isPriority: false,
+    description: "Gói miễn phí - Không thể đặt lịch"
+  },
+  silver: {
+    scheduleLimit: 5,
+    isPriority: false,
+    description: "Gói Bạc - 5 lịch hẹn/tuần"
+  },
+  gold: {
+    scheduleLimit: 10,
+    isPriority: false,
+    description: "Gói Vàng - 10 lịch hẹn/tuần"
+  },
+  diamond: {
+    scheduleLimit: 20,
+    isPriority: true,
+    description: "Gói Kim Cương - 20 lịch hẹn/tuần + Ưu tiên hiển thị"
+  }
+};
 
 // Generate unique order code
 const generateOrderCode = () => {
   return Math.floor(Date.now() / 1000);
 };
 
-// Create payment link
-export const createPayment = async (req, res) => {
+// Create payment link for doctor subscription package
+export const createPackagePayment = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { amount, description } = req.body;
+    const doctorId = req.doctor._id;
+    const { packageType, duration } = req.body;
 
     // Validate input
-    if (!amount || !description) {
+    if (!packageType || !duration) {
       return res.status(400).json({
-        message: "Vui lòng nhập đầy đủ số tiền và mô tả",
+        message: "Vui lòng chọn gói và thời hạn",
       });
     }
 
-    // Validate amount (minimum 2000 VND for PayOS)
-    if (amount < 2000) {
+    // Validate package type
+    if (!["silver", "gold", "diamond"].includes(packageType)) {
       return res.status(400).json({
-        message: "Số tiền tối thiểu là 2,000 VND",
+        message: "Gói không hợp lệ. Chọn: silver, gold, hoặc diamond",
       });
     }
 
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    // Validate duration
+    if (![1, 3, 6, 12].includes(duration)) {
+      return res.status(400).json({
+        message: "Thời hạn không hợp lệ. Chọn: 1, 3, 6, hoặc 12 tháng",
+      });
+    }
+
+    // Check if doctor exists
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại" });
+    }
+
+    // Check if doctor is verified
+    if (doctor.doctorApplicationStatus !== "accepted") {
+      return res.status(403).json({
+        message: "Chỉ bác sĩ đã được duyệt mới có thể mua gói",
+      });
+    }
+
+    // Get package price
+    const amount = PACKAGE_PRICES[packageType][duration];
+    if (!amount) {
+      return res.status(400).json({
+        message: "Không tìm thấy giá cho gói này",
+      });
     }
 
     // Generate order code
     const orderCode = generateOrderCode();
 
+    // Create short description (max 25 characters for PayOS)
+    const packageNames = {
+      silver: "Bac",
+      gold: "Vang", 
+      diamond: "KC"
+    };
+    
+    // Short description for PayOS (max 25 chars)
+    const shortDescription = `Goi ${packageNames[packageType]} ${duration}T`;
+    
+    // Full description for database
+    const fullDescription = `Gói ${packageType === 'silver' ? 'Bạc' : packageType === 'gold' ? 'Vàng' : 'Kim Cương'} - ${duration} tháng - Dr. ${doctor.fullName}`;
+
     // Create payment record in database
     const payment = new Payment({
-      userId,
+      doctorId,
       orderCode,
       amount,
-      description,
+      description: fullDescription, // Store full description in DB
+      packageType,
+      packageDuration: duration,
       status: "PENDING",
     });
 
-    // PayOS payment data
+    // PayOS payment data with short description
     const paymentData = {
       orderCode: orderCode,
       amount: amount,
-      description: description,
-      returnUrl: `${process.env.CLIENT_URL}/payment/success`,
-      cancelUrl: `${process.env.CLIENT_URL}/payment/cancel`,
+      description: shortDescription, // Use short description for PayOS
+      returnUrl: `${process.env.CLIENT_URL}/doctor/payment/success`,
+      cancelUrl: `${process.env.CLIENT_URL}/doctor/payment/cancel`,
     };
 
     // Create payment link with PayOS
@@ -63,14 +146,17 @@ export const createPayment = async (req, res) => {
     await payment.save();
 
     res.status(200).json({
-      message: "Tạo liên kết thanh toán thành công",
+      message: "Tạo liên kết thanh toán gói thành công",
       payment: {
         orderCode: payment.orderCode,
         amount: payment.amount,
         description: payment.description,
+        packageType: payment.packageType,
+        packageDuration: payment.packageDuration,
         paymentUrl: payment.paymentUrl,
         status: payment.status,
       },
+      packageInfo: PACKAGE_BENEFITS[packageType],
     });
   } catch (error) {
     console.error("PayOS Error:", error);
@@ -81,8 +167,8 @@ export const createPayment = async (req, res) => {
   }
 };
 
-// Handle PayOS webhook
-export const handlePayOSWebhook = async (req, res) => {
+// Handle PayOS webhook for package payments
+export const handlePackagePaymentWebhook = async (req, res) => {
   try {
     const webhookData = req.body;
     
@@ -105,14 +191,33 @@ export const handlePayOSWebhook = async (req, res) => {
       payment.paidAt = new Date();
       await payment.save();
 
-      // Update user balance
-      const user = await User.findById(payment.userId);
-      if (user) {
-        user.balance += payment.amount;
-        await user.save();
+      // Update doctor subscription
+      const doctor = await Doctor.findById(payment.doctorId);
+      if (doctor) {
+        const now = new Date();
+        const startDate = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now 
+          ? doctor.subscriptionEndDate 
+          : now;
+        
+        const endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+
+        // Update doctor subscription
+        doctor.subscriptionPackage = payment.packageType;
+        doctor.subscriptionStartDate = startDate;
+        doctor.subscriptionEndDate = endDate;
+        
+        // Update benefits based on package
+        const benefits = PACKAGE_BENEFITS[payment.packageType];
+        doctor.scheduleLimits.weekly = benefits.scheduleLimit;
+        doctor.scheduleLimits.used = 0; // Reset weekly usage
+        doctor.scheduleLimits.resetDate = getNextWeekReset();
+        doctor.isPriority = benefits.isPriority;
+        
+        await doctor.save();
       }
 
-      console.log(`Payment successful for order ${orderCode}`);
+      console.log(`Package payment successful for order ${orderCode}`);
     } else {
       // Payment failed or cancelled
       const orderCode = webhookData.data.orderCode;
@@ -124,7 +229,7 @@ export const handlePayOSWebhook = async (req, res) => {
         await payment.save();
       }
 
-      console.log(`Payment failed for order ${orderCode}`);
+      console.log(`Package payment failed for order ${orderCode}`);
     }
 
     res.status(200).json({ message: "Webhook processed successfully" });
@@ -134,16 +239,25 @@ export const handlePayOSWebhook = async (req, res) => {
   }
 };
 
-// Check payment status
-export const checkPaymentStatus = async (req, res) => {
+// Helper function to get next week reset date (every Monday)
+const getNextWeekReset = () => {
+  const now = new Date();
+  const nextMonday = new Date(now);
+  nextMonday.setDate(now.getDate() + (1 + 7 - now.getDay()) % 7);
+  nextMonday.setHours(0, 0, 0, 0);
+  return nextMonday;
+};
+
+// Check package payment status
+export const checkPackagePaymentStatus = async (req, res) => {
   try {
     const { orderCode } = req.params;
-    const userId = req.user._id;
+    const doctorId = req.doctor._id;
 
     // Find payment record
     const payment = await Payment.findOne({ 
       orderCode: parseInt(orderCode),
-      userId 
+      doctorId 
     });
 
     if (!payment) {
@@ -160,11 +274,30 @@ export const checkPaymentStatus = async (req, res) => {
         payment.paidAt = new Date();
         await payment.save();
 
-        // Update user balance
-        const user = await User.findById(payment.userId);
-        if (user) {
-          user.balance += payment.amount;
-          await user.save();
+        // Update doctor subscription
+        const doctor = await Doctor.findById(payment.doctorId);
+        if (doctor) {
+          const now = new Date();
+          const startDate = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now 
+            ? doctor.subscriptionEndDate 
+            : now;
+          
+          const endDate = new Date(startDate);
+          endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+
+          // Update doctor subscription
+          doctor.subscriptionPackage = payment.packageType;
+          doctor.subscriptionStartDate = startDate;
+          doctor.subscriptionEndDate = endDate;
+          
+          // Update benefits based on package
+          const benefits = PACKAGE_BENEFITS[payment.packageType];
+          doctor.scheduleLimits.weekly = benefits.scheduleLimit;
+          doctor.scheduleLimits.used = 0; // Reset weekly usage
+          doctor.scheduleLimits.resetDate = getNextWeekReset();
+          doctor.isPriority = benefits.isPriority;
+          
+          await doctor.save();
         }
       } else if (paymentInfo.status === "CANCELLED") {
         payment.status = "CANCELLED";
@@ -180,11 +313,13 @@ export const checkPaymentStatus = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Lấy thông tin thanh toán thành công",
+      message: "Lấy thông tin thanh toán gói thành công",
       payment: {
         orderCode: payment.orderCode,
         amount: payment.amount,
         description: payment.description,
+        packageType: payment.packageType,
+        packageDuration: payment.packageDuration,
         status: payment.status,
         paymentUrl: payment.paymentUrl,
         paidAt: payment.paidAt,
@@ -194,22 +329,22 @@ export const checkPaymentStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Check Payment Error:", error);
+    console.error("Check Package Payment Error:", error);
     res.status(500).json({ 
-      message: "Lỗi kiểm tra trạng thái thanh toán",
+      message: "Lỗi kiểm tra trạng thái thanh toán gói",
       error: error.message 
     });
   }
 };
 
-// Get user's payment history
-export const getPaymentHistory = async (req, res) => {
+// Get doctor's package payment history
+export const getDoctorPaymentHistory = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const doctorId = req.doctor._id;
     const { page = 1, limit = 10, status } = req.query;
 
     // Build query
-    const query = { userId };
+    const query = { doctorId };
     if (status) {
       query.status = status;
     }
@@ -231,7 +366,7 @@ export const getPaymentHistory = async (req, res) => {
     const totalPayments = await Payment.countDocuments(query);
 
     res.status(200).json({
-      message: "Lấy lịch sử thanh toán thành công",
+      message: "Lấy lịch sử thanh toán gói thành công",
       payments,
       pagination: {
         currentPage: options.page,
@@ -242,22 +377,22 @@ export const getPaymentHistory = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ 
-      message: "Lỗi lấy lịch sử thanh toán",
+      message: "Lỗi lấy lịch sử thanh toán gói",
       error: error.message 
     });
   }
 };
 
-// Cancel payment (if still pending)
-export const cancelPayment = async (req, res) => {
+// Cancel package payment (if still pending)
+export const cancelPackagePayment = async (req, res) => {
   try {
     const { orderCode } = req.params;
-    const userId = req.user._id;
+    const doctorId = req.doctor._id;
 
     // Find payment record
     const payment = await Payment.findOne({ 
       orderCode: parseInt(orderCode),
-      userId,
+      doctorId,
       status: "PENDING"
     });
 
@@ -277,7 +412,7 @@ export const cancelPayment = async (req, res) => {
       await payment.save();
 
       res.status(200).json({
-        message: "Hủy thanh toán thành công",
+        message: "Hủy thanh toán gói thành công",
         payment: {
           orderCode: payment.orderCode,
           status: payment.status,
@@ -293,7 +428,30 @@ export const cancelPayment = async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ 
-      message: "Lỗi hủy thanh toán",
+      message: "Lỗi hủy thanh toán gói",
+      error: error.message 
+    });
+  }
+};
+
+// Get available packages and pricing
+export const getPackages = async (req, res) => {
+  try {
+    const packages = Object.keys(PACKAGE_PRICES).map(packageType => ({
+      type: packageType,
+      name: packageType === 'silver' ? 'Gói Bạc' : 
+            packageType === 'gold' ? 'Gói Vàng' : 'Gói Kim Cương',
+      benefits: PACKAGE_BENEFITS[packageType],
+      pricing: PACKAGE_PRICES[packageType],
+    }));
+
+    res.status(200).json({
+      message: "Lấy danh sách gói thành công",
+      packages,
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi lấy danh sách gói",
       error: error.message 
     });
   }

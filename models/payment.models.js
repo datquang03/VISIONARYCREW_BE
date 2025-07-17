@@ -2,9 +2,9 @@ import mongoose from "mongoose";
 
 const paymentSchema = new mongoose.Schema(
   {
-    userId: {
+    doctorId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Doctor",
       required: true,
     },
     orderCode: {
@@ -20,6 +20,16 @@ const paymentSchema = new mongoose.Schema(
     description: {
       type: String,
       required: true,
+    },
+    packageType: {
+      type: String,
+      enum: ["silver", "gold", "diamond"],
+      required: true,
+    },
+    packageDuration: {
+      type: Number, // Duration in months
+      required: true,
+      default: 1,
     },
     status: {
       type: String,
