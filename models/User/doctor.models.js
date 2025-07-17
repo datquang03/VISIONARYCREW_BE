@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+  import mongoose from "mongoose";
 
 const doctorSchema = new mongoose.Schema(
   {
@@ -104,6 +104,11 @@ const doctorSchema = new mongoose.Schema(
       enum: ["pending", "accepted", "rejected", null],
       default: null,
     },
+    doctorRegisterId: {
+      type: String,
+      unique: true,
+      required: true,
+    },    
     rejectionMessage: {
       type: String,
       trim: true,
@@ -194,14 +199,10 @@ const doctorSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    doctorRegisterId: {
-      type: String,
-      default: null,
-    },
   },
-  {
-    timestamps: true,
-  }
+{
+  timestamps: true,
+}
 );
 
 const Doctor = mongoose.model("Doctor", doctorSchema);

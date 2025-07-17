@@ -1,18 +1,27 @@
 import express from "express";
 import {
   registerDoctor,
+  reRegisterDoctor,
   login,
   getAllDoctors,
   getMyProfile,
   getDoctorById,
+  getDoctorByRegisterId,
   getPendingDoctor,
-  handleDoctorApplication, // Updated import
+  handleDoctorApplication,
   getMySubscription,
   checkScheduleAvailability,
   incrementScheduleUsage,
   getAllDoctorsWithPriority,
 } from "../controllers/doctor.controllers.js";
-import { admin, protectRouter, protectDoctorRouter } from "../middlewares/auth.js";
+import { 
+  admin, 
+  allowOnlyAcceptedDoctor, 
+  allowOnlyPendingOrRejectedDoctor, 
+  protectRouter, 
+  protectRouterForDoctor,
+  protectDoctorRouter 
+} from "../middlewares/auth.js";
 import multer from "multer";
 import path from "path";
 
@@ -52,18 +61,22 @@ const uploadAny = upload.any();
 
 const router = express.Router();
 
-router.post("/register", uploadAny, handleMulterError, registerDoctor);
-
+// Authentication routes
 router.post("/login", login);
 
-router.get("/profile", protectRouter, getMyProfile);
+// Doctor registration routes
+router.post("/register", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, uploadAny, handleMulterError, registerDoctor);
+router.post("/reregister", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, uploadAny, handleMulterError, reRegisterDoctor);
 
+// Doctor profile routes
+router.get("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, getMyProfile);
+router.get("/register/:doctorRegisterId", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, getDoctorByRegisterId);
+router.get("/:id", protectRouterForDoctor, getDoctorById);
+
+// Doctor list and management routes
+router.get("/", protectRouter, getAllDoctors);
 router.get("/pending", protectRouter, admin, getPendingDoctor);
-router.get("/:id", getDoctorById);
-
-router.get("/", protectRouter, admin, getAllDoctors);
-
-router.post("/handle", protectRouter, admin, handleDoctorApplication);
+router.patch("/handle", protectRouter, admin, handleDoctorApplication);
 
 // Subscription and package related routes
 router.get("/subscription/my", protectDoctorRouter, getMySubscription);
