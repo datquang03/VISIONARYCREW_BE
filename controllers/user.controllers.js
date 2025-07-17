@@ -217,13 +217,6 @@ export const updateUserProfile = async (req, res) => {
     const userId = req.user._id;
     const { username, email, phone, dateOfBirth, description } = req.body;
 
-    // Check if user has admin role
-    if (req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ message: "Chỉ admin mới có quyền cập nhật hồ sơ người dùng" });
-    }
-
     // Validate required fields
     if (!username || !email || !phone || !dateOfBirth) {
       return res

@@ -20,9 +20,9 @@ router.post("/register", register);
 router.post("/verify-email", verifyEmailCode);
 router.post("/login", login);
 router.get("/profile", protectRouter, getMyProfile);
+router.put("/profile", protectRouter, updateUserProfile);
 router.get("/:id", getUserById);
 router.get("/", getAllUsers);
-router.put("/profile", protectRouter, admin, updateUserProfile);
 router.delete("/account", protectRouter, admin, deleteUserAccount);
 
 
