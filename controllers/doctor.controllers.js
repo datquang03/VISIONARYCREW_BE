@@ -333,3 +333,185 @@ export const getDoctorById = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// Get doctor's current subscription info
+export const getMySubscription = async (req, res) => {
+  try {
+    const doctorId = req.doctor._id;
+    const doctor = await Doctor.findById(doctorId).select(
+      "subscriptionPackage subscriptionStartDate subscriptionEndDate scheduleLimits isPriority"
+    );
+    
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
+    }
+
+    // Check if subscription has expired
+    const now = new Date();
+    let isExpired = false;
+    if (doctor.subscriptionEndDate && doctor.subscriptionEndDate < now) {
+      isExpired = true;
+      // Reset to free package if expired
+      doctor.subscriptionPackage = "free";
+      doctor.scheduleLimits.weekly = 0;
+      doctor.scheduleLimits.used = 0;
+      doctor.isPriority = false;
+      await doctor.save();
+    }
+
+    // Check if weekly limit needs reset (every Monday)
+    if (doctor.scheduleLimits.resetDate && doctor.scheduleLimits.resetDate < now) {
+      doctor.scheduleLimits.used = 0;
+      doctor.scheduleLimits.resetDate = getNextWeekReset();
+      await doctor.save();
+    }
+
+    res.status(200).json({
+      message: "Lấy thông tin gói đăng ký thành công",
+      subscription: {
+        packageType: doctor.subscriptionPackage,
+        startDate: doctor.subscriptionStartDate,
+        endDate: doctor.subscriptionEndDate,
+        isExpired,
+        daysRemaining: doctor.subscriptionEndDate 
+          ? Math.max(0, Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24)))
+          : 0,
+        scheduleLimits: doctor.scheduleLimits,
+        isPriority: doctor.isPriority,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Check if doctor can create a new schedule
+export const checkScheduleAvailability = async (req, res) => {
+  try {
+    const doctorId = req.doctor._id;
+    const doctor = await Doctor.findById(doctorId).select(
+      "subscriptionPackage scheduleLimits subscriptionEndDate"
+    );
+    
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
+    }
+
+    // Check if subscription has expired
+    const now = new Date();
+    if (doctor.subscriptionEndDate && doctor.subscriptionEndDate < now) {
+      return res.status(403).json({
+        message: "Gói đăng ký đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.",
+        canCreateSchedule: false,
+      });
+    }
+
+    // Check if weekly limit needs reset
+    if (doctor.scheduleLimits.resetDate && doctor.scheduleLimits.resetDate < now) {
+      doctor.scheduleLimits.used = 0;
+      doctor.scheduleLimits.resetDate = getNextWeekReset();
+      await doctor.save();
+    }
+
+    const canCreate = doctor.scheduleLimits.used < doctor.scheduleLimits.weekly;
+    const remainingSlots = doctor.scheduleLimits.weekly - doctor.scheduleLimits.used;
+
+    res.status(200).json({
+      message: "Kiểm tra khả năng tạo lịch thành công",
+      canCreateSchedule: canCreate,
+      scheduleLimits: {
+        weekly: doctor.scheduleLimits.weekly,
+        used: doctor.scheduleLimits.used,
+        remaining: remainingSlots,
+        resetDate: doctor.scheduleLimits.resetDate,
+      },
+      packageType: doctor.subscriptionPackage,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Increment schedule usage (call this when a schedule is created)
+export const incrementScheduleUsage = async (req, res) => {
+  try {
+    const doctorId = req.doctor._id;
+    const doctor = await Doctor.findById(doctorId);
+    
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại." });
+    }
+
+    // Check if can create schedule
+    const now = new Date();
+    if (doctor.subscriptionEndDate && doctor.subscriptionEndDate < now) {
+      return res.status(403).json({
+        message: "Gói đăng ký đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.",
+      });
+    }
+
+    // Check if weekly limit needs reset
+    if (doctor.scheduleLimits.resetDate && doctor.scheduleLimits.resetDate < now) {
+      doctor.scheduleLimits.used = 0;
+      doctor.scheduleLimits.resetDate = getNextWeekReset();
+    }
+
+    if (doctor.scheduleLimits.used >= doctor.scheduleLimits.weekly) {
+      return res.status(403).json({
+        message: "Đã đạt giới hạn lịch hẹn trong tuần. Vui lòng nâng cấp gói hoặc chờ tuần sau.",
+      });
+    }
+
+    doctor.scheduleLimits.used += 1;
+    await doctor.save();
+
+    res.status(200).json({
+      message: "Cập nhật số lượng lịch hẹn thành công",
+      scheduleLimits: doctor.scheduleLimits,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Helper function to get next week reset date (every Monday)
+const getNextWeekReset = () => {
+  const now = new Date();
+  const nextMonday = new Date(now);
+  nextMonday.setDate(now.getDate() + (1 + 7 - now.getDay()) % 7);
+  nextMonday.setHours(0, 0, 0, 0);
+  return nextMonday;
+};
+
+// Update getAllDoctors to prioritize diamond members
+export const getAllDoctorsWithPriority = async (req, res) => {
+  try {
+    const totalDoctors = await Doctor.countDocuments();
+    
+    // Get doctors with priority sorting (diamond first, then by creation date)
+    const doctors = await Doctor.find()
+      .select(
+        "-password -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail"
+      )
+      .sort({ 
+        isPriority: -1,  // Diamond members first
+        createdAt: -1 
+      });
+      
+    if (!doctors || doctors.length === 0) {
+      return res.status(404).json({ message: "Không có bác sĩ nào" });
+    }
+    
+    res.status(200).json({
+      message: `Có tổng ${doctors.length} bác sĩ`,
+      doctors: doctors.map((doctor) => ({
+        ...doctor.toObject(),
+        doctorRegisterId: doctor.doctorRegisterId,
+      })),
+      totalDoctors,
+    });
+  } catch (error) {
+    console.error("Get all doctors with priority error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
