@@ -7,8 +7,12 @@ import {
   getDoctorById,
   getPendingDoctor,
   handleDoctorApplication, // Updated import
+  getMySubscription,
+  checkScheduleAvailability,
+  incrementScheduleUsage,
+  getAllDoctorsWithPriority,
 } from "../controllers/doctor.controllers.js";
-import { admin, protectRouter } from "../middlewares/auth.js";
+import { admin, protectRouter, protectDoctorRouter } from "../middlewares/auth.js";
 import multer from "multer";
 import path from "path";
 
@@ -60,5 +64,13 @@ router.get("/:id", getDoctorById);
 router.get("/", protectRouter, admin, getAllDoctors);
 
 router.post("/handle", protectRouter, admin, handleDoctorApplication);
+
+// Subscription and package related routes
+router.get("/subscription/my", protectDoctorRouter, getMySubscription);
+router.get("/subscription/check", protectDoctorRouter, checkScheduleAvailability);
+router.post("/subscription/increment", protectDoctorRouter, incrementScheduleUsage);
+
+// Updated route for prioritized doctor listing
+router.get("/list/priority", getAllDoctorsWithPriority);
 
 export default router;

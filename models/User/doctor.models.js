@@ -158,6 +158,46 @@ const doctorSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    // Subscription package fields
+    subscriptionPackage: {
+      type: String,
+      enum: ["free", "silver", "gold", "diamond"],
+      default: "free",
+    },
+    subscriptionStartDate: {
+      type: Date,
+      default: null,
+    },
+    subscriptionEndDate: {
+      type: Date,
+      default: null,
+    },
+    scheduleLimits: {
+      weekly: {
+        type: Number,
+        default: 0, // Free: 0, Silver: 5, Gold: 10, Diamond: 20
+      },
+      used: {
+        type: Number,
+        default: 0,
+      },
+      resetDate: {
+        type: Date,
+        default: null,
+      },
+    },
+    isPriority: {
+      type: Boolean,
+      default: false, // Diamond members get priority in listing
+    },
+    balance: {
+      type: Number,
+      default: 0,
+    },
+    doctorRegisterId: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
