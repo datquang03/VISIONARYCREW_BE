@@ -216,8 +216,6 @@ export const handlePackagePaymentWebhook = async (req, res) => {
         
         await doctor.save();
       }
-
-      console.log(`Package payment successful for order ${orderCode}`);
     } else {
       // Payment failed or cancelled
       const orderCode = webhookData.data.orderCode;
@@ -228,8 +226,6 @@ export const handlePackagePaymentWebhook = async (req, res) => {
         payment.cancelledAt = new Date();
         await payment.save();
       }
-
-      console.log(`Package payment failed for order ${orderCode}`);
     }
 
     res.status(200).json({ message: "Webhook processed successfully" });
@@ -254,14 +250,24 @@ export const checkPackagePaymentStatus = async (req, res) => {
     const { orderCode } = req.params;
     const doctorId = req.doctor._id;
 
-    // Find payment record
-    const payment = await Payment.findOne({ 
+    // Try finding with different orderCode formats
+    let payment = await Payment.findOne({ 
       orderCode: parseInt(orderCode),
       doctorId 
     });
 
+    // If not found with parseInt, try with original string
     if (!payment) {
-      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+      payment = await Payment.findOne({ 
+        orderCode: orderCode,
+        doctorId 
+      });
+    }
+
+    if (!payment) {
+      return res.status(404).json({ 
+        message: "Không tìm thấy đơn hàng"
+      });
     }
 
     // Get payment info from PayOS
@@ -309,7 +315,7 @@ export const checkPackagePaymentStatus = async (req, res) => {
         await payment.save();
       }
     } catch (payOSError) {
-      console.log("PayOS API Error:", payOSError.message);
+      // PayOS API error - continue with local payment info
     }
 
     res.status(200).json({
