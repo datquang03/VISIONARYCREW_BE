@@ -52,6 +52,7 @@ const router = express.Router();
 
 // Authentication routes
 router.post("/login", login);
+router.get("/pending", getPendingDoctor);
 
 // Doctor registration routes
 router.post("/register", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, uploadAny, handleMulterError, registerDoctor);
@@ -64,7 +65,6 @@ router.get("/:id", protectRouterForDoctor, getDoctorById);
 
 // Doctor list and management routes
 router.get("/", protectRouter, getAllDoctors);
-router.get("/pending", protectRouter, admin, getPendingDoctor);
 router.patch("/handle", protectRouter, admin, handleDoctorApplication);
 
 export default router;

@@ -8,7 +8,7 @@ export const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 };
 
-// Protect router for general users (User model)
+// Protect router
 export const protectRouter = asyncHandler(async (req, res, next) => {
   let token;
   if (
