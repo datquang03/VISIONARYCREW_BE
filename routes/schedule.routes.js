@@ -1,5 +1,5 @@
 import express from "express";
-import { auth } from "../middlewares/auth.js";
+import { protectRouter, protectRouterForDoctor } from "../middlewares/auth.js";
 import {
   createSchedule,
   getAllSchedules,
@@ -11,24 +11,27 @@ import {
   registerSchedule,
   cancelRegisteredSchedule,
   getMyRegisteredSchedules,
+  makeScheduleAvailable,
 } from "../controllers/schedule.controllers.js";
 
 const router = express.Router();
-
-// Doctor routes (requires authentication)
-router.post("/create", auth, createSchedule);
-router.get("/my-schedules", auth, getMySchedules);
-router.put("/:scheduleId", auth, updateSchedule);
-router.delete("/:scheduleId", auth, deleteSchedule);
-
-// User routes (requires authentication)
-router.post("/register/:scheduleId", auth, registerSchedule);
-router.post("/cancel/:scheduleId", auth, cancelRegisteredSchedule);
-router.get("/my-registered", auth, getMyRegisteredSchedules);
-
 // Public routes (no authentication required)
 router.get("/all", getAllSchedules);
 router.get("/available", getAvailableSchedules);
 router.get("/doctor/:doctorId", getDoctorSchedules);
+
+// Doctor routes (requires authentication)
+router.post("/create", protectRouterForDoctor, createSchedule);
+router.get("/my-schedules", protectRouterForDoctor, getMySchedules);
+router.put("/:scheduleId", protectRouterForDoctor, updateSchedule);
+router.delete("/:scheduleId", protectRouterForDoctor, deleteSchedule);
+router.post("/reactivate/:scheduleId", protectRouterForDoctor, makeScheduleAvailable);
+
+// User routes (requires authentication)
+router.post("/register/:scheduleId", protectRouter, registerSchedule);
+router.post("/cancel/:scheduleId", protectRouter, cancelRegisteredSchedule);
+router.get("/my-registered", protectRouter, getMyRegisteredSchedules);
+
+
 
 export default router;
