@@ -94,6 +94,56 @@ export const createPackagePayment = async (req, res) => {
       });
     }
 
+    // Check current subscription and validate purchase rules
+    const now = new Date();
+    const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
+    
+    if (hasActiveSubscription) {
+      const currentPackage = doctor.subscriptionPackage;
+      
+      // Define package hierarchy for upgrade/downgrade logic
+      const packageHierarchy = {
+        "free": 0,
+        "silver": 1, 
+        "gold": 2,
+        "diamond": 3
+      };
+      
+      const currentLevel = packageHierarchy[currentPackage] || 0;
+      const newLevel = packageHierarchy[packageType];
+      
+      // Rule 1: Can't buy the same package if still active
+      if (currentPackage === packageType) {
+        const remainingDays = Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24));
+        return res.status(400).json({
+          message: `Bạn đã có gói ${packageType === 'silver' ? 'Bạc' : packageType === 'gold' ? 'Vàng' : 'Kim Cương'} còn hiệu lực ${remainingDays} ngày. Vui lòng chờ hết hạn hoặc chọn gói khác.`,
+          currentSubscription: {
+            package: currentPackage,
+            endDate: doctor.subscriptionEndDate,
+            remainingDays: remainingDays
+          }
+        });
+      }
+      
+      // Rule 2: Allow upgrade to higher package
+      if (newLevel > currentLevel) {
+        // Upgrade allowed - will replace current subscription
+      }
+      
+      // Rule 3: Prevent downgrade to lower package while active
+      else if (newLevel < currentLevel) {
+        const remainingDays = Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24));
+        return res.status(400).json({
+          message: `Không thể hạ cấp từ gói ${currentPackage === 'silver' ? 'Bạc' : currentPackage === 'gold' ? 'Vàng' : 'Kim Cương'} xuống gói ${packageType === 'silver' ? 'Bạc' : packageType === 'gold' ? 'Vàng' : 'Kim Cương'} khi còn ${remainingDays} ngày hiệu lực. Vui lòng chờ hết hạn.`,
+          currentSubscription: {
+            package: currentPackage,
+            endDate: doctor.subscriptionEndDate,
+            remainingDays: remainingDays
+          }
+        });
+      }
+    }
+
     // Get package price
     const amount = PACKAGE_PRICES[packageType][duration];
     if (!amount) {
@@ -145,7 +195,33 @@ export const createPackagePayment = async (req, res) => {
     payment.paymentUrl = paymentLinkResponse.checkoutUrl;
     await payment.save();
 
-    res.status(200).json({
+    // Prepare response with upgrade info if applicable
+    let upgradeInfo = null;
+    if (hasActiveSubscription) {
+      const packageHierarchy = {
+        "free": 0,
+        "silver": 1, 
+        "gold": 2,
+        "diamond": 3
+      };
+      
+      const currentLevel = packageHierarchy[doctor.subscriptionPackage] || 0;
+      const newLevel = packageHierarchy[packageType];
+      
+      if (newLevel > currentLevel) {
+        const remainingDays = Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24));
+        upgradeInfo = {
+          isUpgrade: true,
+          fromPackage: doctor.subscriptionPackage,
+          toPackage: packageType,
+          currentEndDate: doctor.subscriptionEndDate,
+          remainingDays: remainingDays,
+          note: "Gói mới sẽ có hiệu lực ngay lập tức sau khi thanh toán thành công"
+        };
+      }
+    }
+
+      res.status(200).json({
       message: "Tạo liên kết thanh toán gói thành công",
       payment: {
         orderCode: payment.orderCode,
@@ -157,6 +233,7 @@ export const createPackagePayment = async (req, res) => {
         status: payment.status,
       },
       packageInfo: PACKAGE_BENEFITS[packageType],
+      upgradeInfo: upgradeInfo,
     });
   } catch (error) {
     console.error("PayOS Error:", error);
@@ -195,12 +272,30 @@ export const handlePackagePaymentWebhook = async (req, res) => {
       const doctor = await Doctor.findById(payment.doctorId);
       if (doctor) {
         const now = new Date();
-        const startDate = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now 
-          ? doctor.subscriptionEndDate 
-          : now;
         
-        const endDate = new Date(startDate);
-        endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+        // For upgrades, start immediately and calculate from current end date if still active
+        // For new subscriptions, start from now
+        let startDate;
+        let endDate;
+        
+        const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
+        const isUpgrade = hasActiveSubscription && doctor.subscriptionPackage !== payment.packageType;
+        
+        if (isUpgrade) {
+          // Upgrade: Start immediately, but preserve remaining time value
+          startDate = now;
+          endDate = new Date(now);
+          endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+          
+          // Optional: Add remaining time from current subscription as bonus
+          // const remainingTime = doctor.subscriptionEndDate - now;
+          // endDate = new Date(endDate.getTime() + remainingTime);
+        } else {
+          // New subscription or renewal after expiry
+          startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
+          endDate = new Date(startDate);
+          endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+        }
 
         // Update doctor subscription
         doctor.subscriptionPackage = payment.packageType;
@@ -216,8 +311,6 @@ export const handlePackagePaymentWebhook = async (req, res) => {
         
         await doctor.save();
       }
-
-      console.log(`Package payment successful for order ${orderCode}`);
     } else {
       // Payment failed or cancelled
       const orderCode = webhookData.data.orderCode;
@@ -228,8 +321,6 @@ export const handlePackagePaymentWebhook = async (req, res) => {
         payment.cancelledAt = new Date();
         await payment.save();
       }
-
-      console.log(`Package payment failed for order ${orderCode}`);
     }
 
     res.status(200).json({ message: "Webhook processed successfully" });
@@ -254,14 +345,24 @@ export const checkPackagePaymentStatus = async (req, res) => {
     const { orderCode } = req.params;
     const doctorId = req.doctor._id;
 
-    // Find payment record
-    const payment = await Payment.findOne({ 
+    // Try finding with different orderCode formats
+    let payment = await Payment.findOne({ 
       orderCode: parseInt(orderCode),
       doctorId 
     });
 
+    // If not found with parseInt, try with original string
     if (!payment) {
-      return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
+      payment = await Payment.findOne({ 
+        orderCode: orderCode,
+        doctorId 
+      });
+    }
+
+    if (!payment) {
+      return res.status(404).json({ 
+        message: "Không tìm thấy đơn hàng"
+      });
     }
 
     // Get payment info from PayOS
@@ -278,12 +379,26 @@ export const checkPackagePaymentStatus = async (req, res) => {
         const doctor = await Doctor.findById(payment.doctorId);
         if (doctor) {
           const now = new Date();
-          const startDate = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now 
-            ? doctor.subscriptionEndDate 
-            : now;
           
-          const endDate = new Date(startDate);
-          endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+          // For upgrades, start immediately and calculate from current end date if still active
+          // For new subscriptions, start from now
+          let startDate;
+          let endDate;
+          
+          const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
+          const isUpgrade = hasActiveSubscription && doctor.subscriptionPackage !== payment.packageType;
+          
+          if (isUpgrade) {
+            // Upgrade: Start immediately, but preserve remaining time value
+            startDate = now;
+            endDate = new Date(now);
+            endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+          } else {
+            // New subscription or renewal after expiry
+            startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
+            endDate = new Date(startDate);
+            endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+          }
 
           // Update doctor subscription
           doctor.subscriptionPackage = payment.packageType;
@@ -309,7 +424,7 @@ export const checkPackagePaymentStatus = async (req, res) => {
         await payment.save();
       }
     } catch (payOSError) {
-      console.log("PayOS API Error:", payOSError.message);
+      // PayOS API error - continue with local payment info
     }
 
     res.status(200).json({
