@@ -263,8 +263,8 @@ export const getAllDoctors = async (req, res) => {
 // Get by register ID
 export const getDoctorByRegisterId = async (req, res) => {
   try {
-    const doctor = await Doctor.findOne({ doctorRegisterId: req.params.doctorId });
-    if (!doctor) return res.status(404).json({ message: "Không tìm thấy đơn đăng ký bác sĩ với mã này." });
+    const doctor = await Doctor.findOne({ doctorRegisterId: req.params.doctorRegisterId });
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ với ID đăng ký này." });
 
     res.status(200).json({
       message: "Lấy thông tin thành công",
@@ -282,6 +282,21 @@ export const getDoctorByRegisterId = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// delete doctor by register ID
+export const deleteDoctorByRegisterId = async (req, res) => {
+  try {
+    const { doctorRegisterId } = req.params;
+    const doctor = await Doctor.findOneAndDelete({ doctorRegisterId });
+
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ với ID đăng ký này." });
+
+    res.status(200).json({ message: "Đã xóa bác sĩ thành công." });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 
 // Get pending
 export const getPendingDoctor = async (req, res) => {

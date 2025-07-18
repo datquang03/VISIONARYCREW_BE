@@ -13,6 +13,7 @@ import {
   checkScheduleAvailability,
   incrementScheduleUsage,
   getAllDoctorsWithPriority,
+  deleteDoctorByRegisterId,
 } from "../controllers/doctor.controllers.js";
 import { 
   admin, 
@@ -66,16 +67,18 @@ router.post("/login", login);
 router.get("/pending", getPendingDoctor);
 
 // Doctor registration routes
-router.post("/register", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, uploadAny, handleMulterError, registerDoctor);
+router.get("/", getAllDoctors);
+router.get("/pending",getPendingDoctor);
+router.post("/register", uploadAny, handleMulterError, registerDoctor);
 router.post("/reregister", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, uploadAny, handleMulterError, reRegisterDoctor);
 
 // Doctor profile routes
+router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
 router.get("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, getMyProfile);
 router.get("/register/:doctorRegisterId", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, getDoctorByRegisterId);
 router.get("/:id", protectRouterForDoctor, getDoctorById);
 
 // Doctor list and management routes
-router.get("/", protectRouter, getAllDoctors);
 router.patch("/handle", protectRouter, admin, handleDoctorApplication);
 
 // Subscription and package related routes

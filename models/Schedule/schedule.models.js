@@ -77,6 +77,7 @@ const scheduleSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    versionKey: false // Disable the version key
   }
 );
 

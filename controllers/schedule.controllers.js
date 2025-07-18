@@ -4,26 +4,128 @@ import Doctor from "../models/User/doctor.models.js";
 // Create a new schedule slot
 export const createSchedule = async (req, res) => {
   try {
-    const { date, timeSlot, appointmentType } = req.body;
-    const doctorId = req.user._id; // Get doctor ID from authenticated user
+    const { date, timeSlot, appointmentType, notes, meetingLink } = req.body;
+    const doctorId = req.doctor._id; // Get doctor ID from authenticated doctor
 
-    // Check if doctor exists
-    const doctor = await Doctor.findById(doctorId);
-    if (!doctor) {
-      return res.status(404).json({ message: "Doctor not found" });
+    // Validate time slot format and duration
+    if (!timeSlot || !timeSlot.startTime || !timeSlot.endTime) {
+      return res.status(400).json({
+        message: "Thời gian bắt đầu và kết thúc là bắt buộc"
+      });
     }
 
-    // Check if a schedule already exists for this time slot
+    // Convert time strings to Date objects for comparison
+    const [startHour, startMinute] = timeSlot.startTime.split(':').map(Number);
+    const [endHour, endMinute] = timeSlot.endTime.split(':').map(Number);
+
+    // Calculate duration in minutes
+    const durationInMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+
+    // Validate time format and logical sequence
+    if (durationInMinutes <= 0) {
+      return res.status(400).json({
+        message: "Thời gian kết thúc phải sau thời gian bắt đầu"
+      });
+    }
+
+    // Validate minimum duration (1 hour = 60 minutes)
+    if (durationInMinutes < 60) {
+      return res.status(400).json({
+        message: "Thời gian hẹn phải ít nhất 1 giờ"
+      });
+    }
+
+    // Check for overlapping schedules
+    const [newStartHour, newStartMin] = timeSlot.startTime.split(':').map(Number);
+    const [newEndHour, newEndMin] = timeSlot.endTime.split(':').map(Number);
+    const newStartMinutes = newStartHour * 60 + newStartMin;
+    const newEndMinutes = newEndHour * 60 + newEndMin;
+
     const existingSchedule = await Schedule.findOne({
       doctor: doctorId,
       date: new Date(date),
-      'timeSlot.startTime': timeSlot.startTime,
-      'timeSlot.endTime': timeSlot.endTime,
+      $or: [
+        // Case 1: New slot starts during an existing slot
+        {
+          $expr: {
+            $and: [
+              {
+                $lte: [
+                  { $sum: [
+                    { $multiply: [{ $toInt: { $substr: ['$timeSlot.startTime', 0, 2] } }, 60] },
+                    { $toInt: { $substr: ['$timeSlot.startTime', 3, 2] } }
+                  ]},
+                  newStartMinutes
+                ]
+              },
+              {
+                $gt: [
+                  { $sum: [
+                    { $multiply: [{ $toInt: { $substr: ['$timeSlot.endTime', 0, 2] } }, 60] },
+                    { $toInt: { $substr: ['$timeSlot.endTime', 3, 2] } }
+                  ]},
+                  newStartMinutes
+                ]
+              }
+            ]
+          }
+        },
+        // Case 2: New slot ends during an existing slot
+        {
+          $expr: {
+            $and: [
+              {
+                $lt: [
+                  { $sum: [
+                    { $multiply: [{ $toInt: { $substr: ['$timeSlot.startTime', 0, 2] } }, 60] },
+                    { $toInt: { $substr: ['$timeSlot.startTime', 3, 2] } }
+                  ]},
+                  newEndMinutes
+                ]
+              },
+              {
+                $gte: [
+                  { $sum: [
+                    { $multiply: [{ $toInt: { $substr: ['$timeSlot.endTime', 0, 2] } }, 60] },
+                    { $toInt: { $substr: ['$timeSlot.endTime', 3, 2] } }
+                  ]},
+                  newEndMinutes
+                ]
+              }
+            ]
+          }
+        },
+        // Case 3: New slot completely contains an existing slot
+        {
+          $expr: {
+            $and: [
+              {
+                $gte: [
+                  { $sum: [
+                    { $multiply: [{ $toInt: { $substr: ['$timeSlot.startTime', 0, 2] } }, 60] },
+                    { $toInt: { $substr: ['$timeSlot.startTime', 3, 2] } }
+                  ]},
+                  newStartMinutes
+                ]
+              },
+              {
+                $lte: [
+                  { $sum: [
+                    { $multiply: [{ $toInt: { $substr: ['$timeSlot.endTime', 0, 2] } }, 60] },
+                    { $toInt: { $substr: ['$timeSlot.endTime', 3, 2] } }
+                  ]},
+                  newEndMinutes
+                ]
+              }
+            ]
+          }
+        }
+      ]
     });
 
     if (existingSchedule) {
       return res.status(400).json({ 
-        message: "A schedule already exists for this time slot" 
+        message: "Thời gian này đã chồng chéo với một lịch hẹn khác của bạn" 
       });
     }
 
@@ -33,17 +135,19 @@ export const createSchedule = async (req, res) => {
       date,
       timeSlot,
       appointmentType,
+      notes,
+      meetingLink
     });
 
     await schedule.save();
 
     res.status(201).json({
-      message: "Schedule created successfully",
+      message: "Tạo lịch hẹn thành công",
       schedule
     });
   } catch (error) {
     res.status(500).json({ 
-      message: "Error creating schedule", 
+      message: "Lỗi tạo lịch hẹn", 
       error: error.message 
     });
   }
@@ -52,7 +156,7 @@ export const createSchedule = async (req, res) => {
 // Get logged-in doctor's schedules
 export const getMySchedules = async (req, res) => {
   try {
-    const doctorId = req.user._id; // Get logged-in doctor's ID from auth token
+    const doctorId = req.doctor._id; // Get logged-in doctor's ID from auth token
     const { date, status } = req.query;
 
     let query = { doctor: doctorId };
@@ -76,7 +180,7 @@ export const getMySchedules = async (req, res) => {
     res.status(200).json(schedules);
   } catch (error) {
     res.status(500).json({ 
-      message: "Error fetching your schedules", 
+      message: "Lỗi lấy lịch hẹn", 
       error: error.message 
     });
   }
@@ -87,7 +191,7 @@ export const getDoctorSchedules = async (req, res) => {
   try {
     const { doctorId } = req.params;
     if (!doctorId) {
-      return res.status(400).json({ message: "Doctor ID is required" });
+      return res.status(400).json({ message: "Cần Id bác sĩ" });
     }
 
     const { date, status } = req.query;
@@ -113,7 +217,7 @@ export const getDoctorSchedules = async (req, res) => {
     res.status(200).json(schedules);
   } catch (error) {
     res.status(500).json({ 
-      message: "Error fetching schedules", 
+      message: "Lỗi lấy lịch hẹn", 
       error: error.message 
     });
   }
@@ -123,7 +227,7 @@ export const getDoctorSchedules = async (req, res) => {
 export const updateSchedule = async (req, res) => {
   try {
     const { scheduleId } = req.params;
-    const doctorId = req.user._id;
+    const doctorId = req.doctor._id;
     const updates = req.body;
 
     // Find schedule and check ownership
@@ -134,18 +238,165 @@ export const updateSchedule = async (req, res) => {
 
     if (!schedule) {
       return res.status(404).json({ 
-        message: "Schedule not found or unauthorized" 
+        message: "Không tìm thấy lịch hẹn hoặc không có quyền truy cập" 
       });
     }
 
     if (schedule.status !== "available") {
       return res.status(400).json({ 
-        message: "Cannot update a booked or completed schedule" 
+        message: "Không thể cập nhật lịch đã được đặt hoặc hoàn thành" 
       });
     }
 
     // Update schedule with allowed fields only
-    const allowedUpdates = ['date', 'timeSlot', 'appointmentType', 'notes'];
+    const allowedUpdates = ['date', 'timeSlot', 'appointmentType', 'notes', 'meetingLink'];
+
+    // Validate time slot if it's being updated
+    if (updates.timeSlot) {
+      const { startTime, endTime } = updates.timeSlot;
+      
+      if (!startTime || !endTime) {
+        return res.status(400).json({
+          message: "Thời gian bắt đầu và kết thúc là bắt buộc"
+        });
+      }
+
+      // Convert time strings to Date objects for comparison
+      const [startHour, startMinute] = startTime.split(':').map(Number);
+      const [endHour, endMinute] = endTime.split(':').map(Number);
+
+      // Calculate duration in minutes
+      const durationInMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+
+      // Validate time format and logical sequence
+      if (durationInMinutes <= 0) {
+        return res.status(400).json({
+          message: "Thời gian kết thúc phải sau thời gian bắt đầu"
+        });
+      }
+
+      // Validate minimum duration (1 hour = 60 minutes)
+      if (durationInMinutes < 60) {
+        return res.status(400).json({
+          message: "Thời gian hẹn phải ít nhất 1 giờ"
+        });
+      }
+
+      // Check for overlapping schedules when updating time
+      const [newStartHour, newStartMin] = startTime.split(':').map(Number);
+      const [newEndHour, newEndMin] = endTime.split(':').map(Number);
+      const newStartMinutes = newStartHour * 60 + newStartMin;
+      const newEndMinutes = newEndHour * 60 + newEndMin;
+
+      const existingOverlap = await Schedule.findOne({
+        doctor: doctorId,
+        _id: { $ne: scheduleId }, // Exclude current schedule
+        date: updates.date || schedule.date,
+        $or: [
+          // Case 1: New slot starts during an existing slot
+          {
+            $expr: {
+              $and: [
+                {
+                  $lte: [
+                    { $sum: [
+                      { $multiply: [{ $toInt: { $substr: ['$timeSlot.startTime', 0, 2] } }, 60] },
+                      { $toInt: { $substr: ['$timeSlot.startTime', 3, 2] } }
+                    ]},
+                    newStartMinutes
+                  ]
+                },
+                {
+                  $gt: [
+                    { $sum: [
+                      { $multiply: [{ $toInt: { $substr: ['$timeSlot.endTime', 0, 2] } }, 60] },
+                      { $toInt: { $substr: ['$timeSlot.endTime', 3, 2] } }
+                    ]},
+                    newStartMinutes
+                  ]
+                }
+              ]
+            }
+          },
+          // Case 2: New slot ends during an existing slot
+          {
+            $expr: {
+              $and: [
+                {
+                  $lt: [
+                    { $sum: [
+                      { $multiply: [{ $toInt: { $substr: ['$timeSlot.startTime', 0, 2] } }, 60] },
+                      { $toInt: { $substr: ['$timeSlot.startTime', 3, 2] } }
+                    ]},
+                    newEndMinutes
+                  ]
+                },
+                {
+                  $gte: [
+                    { $sum: [
+                      { $multiply: [{ $toInt: { $substr: ['$timeSlot.endTime', 0, 2] } }, 60] },
+                      { $toInt: { $substr: ['$timeSlot.endTime', 3, 2] } }
+                    ]},
+                    newEndMinutes
+                  ]
+                }
+              ]
+            }
+          },
+          // Case 3: New slot completely contains an existing slot
+          {
+            $expr: {
+              $and: [
+                {
+                  $gte: [
+                    { $sum: [
+                      { $multiply: [{ $toInt: { $substr: ['$timeSlot.startTime', 0, 2] } }, 60] },
+                      { $toInt: { $substr: ['$timeSlot.startTime', 3, 2] } }
+                    ]},
+                    newStartMinutes
+                  ]
+                },
+                {
+                  $lte: [
+                    { $sum: [
+                      { $multiply: [{ $toInt: { $substr: ['$timeSlot.endTime', 0, 2] } }, 60] },
+                      { $toInt: { $substr: ['$timeSlot.endTime', 3, 2] } }
+                    ]},
+                    newEndMinutes
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      });
+
+      if (existingOverlap) {
+        return res.status(400).json({
+          message: "Thời gian này đã chồng chéo với một lịch hẹn khác của bạn"
+        });
+      }
+    }
+    
+    // Check if trying to update meeting link for offline appointment
+    if (updates.appointmentType === 'offline' && updates.meetingLink) {
+      return res.status(400).json({
+        message: "Không thể thêm meeting link cho lịch hẹn offline"
+      });
+    }
+
+    // If changing from online to offline, clear meeting link
+    if (updates.appointmentType === 'offline' && schedule.appointmentType === 'online') {
+      updates.meetingLink = null;
+    }
+
+    // If changing from offline to online, require meeting link
+    if (updates.appointmentType === 'online' && schedule.appointmentType === 'offline' && !updates.meetingLink) {
+      return res.status(400).json({
+        message: "Meeting link là bắt buộc cho lịch hẹn online"
+      });
+    }
+
     Object.keys(updates).forEach(key => {
       if (allowedUpdates.includes(key)) {
         schedule[key] = updates[key];
@@ -155,12 +406,12 @@ export const updateSchedule = async (req, res) => {
     await schedule.save();
 
     res.status(200).json({
-      message: "Schedule updated successfully",
+      message: "Lịch hẹn đã được cập nhật thành công",
       schedule
     });
   } catch (error) {
     res.status(500).json({ 
-      message: "Error updating schedule", 
+      message: "Lỗi cập nhật lịch hẹn", 
       error: error.message 
     });
   }
@@ -170,7 +421,7 @@ export const updateSchedule = async (req, res) => {
 export const deleteSchedule = async (req, res) => {
   try {
     const { scheduleId } = req.params;
-    const doctorId = req.user._id;
+    const doctorId = req.doctor._id;
 
     const schedule = await Schedule.findOne({
       _id: scheduleId,
@@ -179,24 +430,24 @@ export const deleteSchedule = async (req, res) => {
 
     if (!schedule) {
       return res.status(404).json({ 
-        message: "Schedule not found or unauthorized" 
+        message: "Không tìm thấy lịch hẹn hoặc không có quyền truy cập" 
       });
     }
 
     if (schedule.status !== "available") {
       return res.status(400).json({ 
-        message: "Cannot delete a booked or completed schedule" 
+        message: "Không thể xóa lịch đã được đặt hoặc hoàn thành" 
       });
     }
 
     await schedule.deleteOne();
 
     res.status(200).json({ 
-      message: "Schedule deleted successfully" 
+      message: "Lịch hẹn đã được xóa thành công" 
     });
   } catch (error) {
     res.status(500).json({ 
-      message: "Error deleting schedule", 
+      message: "Lỗi xóa lịch hẹn", 
       error: error.message 
     });
   }
@@ -231,7 +482,7 @@ export const getAvailableSchedules = async (req, res) => {
     res.status(200).json(schedules);
   } catch (error) {
     res.status(500).json({ 
-      message: "Error fetching available schedules", 
+      message: "Lỗi lấy lịch hẹn", 
       error: error.message 
     });
   }
@@ -280,7 +531,7 @@ export const getAllSchedules = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ 
-      message: "Error fetching schedules", 
+      message: "Lỗi lấy lịch hẹn", 
       error: error.message 
     });
   }
@@ -291,13 +542,6 @@ export const registerSchedule = async (req, res) => {
   try {
     const { scheduleId } = req.params;
     const userId = req.user._id; // Get user ID from auth token
-    
-    // Check if the authenticated user is a regular user (not a doctor)
-    if (req.user.role !== "user") {
-      return res.status(403).json({
-        message: "Only patients can register for appointments"
-      });
-    }
 
     // Find the schedule and ensure it's available
     const schedule = await Schedule.findOne({
@@ -309,7 +553,7 @@ export const registerSchedule = async (req, res) => {
 
     if (!schedule) {
       return res.status(404).json({
-        message: "Schedule not found or not available for booking"
+        message: "Lịch hẹn không tồn tại hoặc không còn khả dụng"
       });
     }
 
@@ -324,7 +568,7 @@ export const registerSchedule = async (req, res) => {
 
     if (existingBooking) {
       return res.status(400).json({
-        message: "You already have a booking at this time"
+        message: "Bạn đã có lịch hẹn vào thời gian này"
       });
     }
 
@@ -339,12 +583,12 @@ export const registerSchedule = async (req, res) => {
     await schedule.populate('doctor', 'username fullName doctorType workplace');
 
     res.status(200).json({
-      message: "Schedule booked successfully",
+      message: "Đăng ký lịch hẹn thành công",
       schedule
     });
   } catch (error) {
     res.status(500).json({
-      message: "Error booking schedule",
+      message: "Lỗi đăng ký lịch hẹn",
       error: error.message
     });
   }
@@ -357,16 +601,9 @@ export const cancelRegisteredSchedule = async (req, res) => {
     const { cancelReason } = req.body;
     const userId = req.user._id;
 
-    // Check if the authenticated user is a regular user (not a doctor)
-    if (req.user.role !== "user") {
-      return res.status(403).json({
-        message: "Only patients can cancel their appointments"
-      });
-    }
-
     if (!cancelReason) {
       return res.status(400).json({
-        message: "Cancellation reason is required"
+        message: "Lý do hủy lịch là bắt buộc"
       });
     }
 
@@ -379,14 +616,14 @@ export const cancelRegisteredSchedule = async (req, res) => {
 
     if (!schedule) {
       return res.status(404).json({
-        message: "Booked schedule not found or unauthorized"
+        message: "Lịch hẹn không tồn tại hoặc không phải của bạn"
       });
     }
 
     // Check if the schedule is in the past
     if (new Date(schedule.date) < new Date()) {
       return res.status(400).json({
-        message: "Cannot cancel past schedules"
+        message: "Không thể hủy lịch đã qua"
       });
     }
 
@@ -398,12 +635,12 @@ export const cancelRegisteredSchedule = async (req, res) => {
     await schedule.save();
 
     res.status(200).json({
-      message: "Schedule cancelled successfully",
+      message: "Hủy lịch hẹn thành công",
       schedule
     });
   } catch (error) {
     res.status(500).json({
-      message: "Error cancelling schedule",
+      message: "Lỗi hủy lịch hẹn",
       error: error.message
     });
   }
@@ -414,13 +651,6 @@ export const getMyRegisteredSchedules = async (req, res) => {
   try {
     const userId = req.user._id;
     const { status } = req.query;
-
-    // Check if the authenticated user is a regular user (not a doctor)
-    if (req.user.role !== "user") {
-      return res.status(403).json({
-        message: "Only patients can view their appointments"
-      });
-    }
 
     let query = {
       patient: userId
@@ -437,8 +667,59 @@ export const getMyRegisteredSchedules = async (req, res) => {
     res.status(200).json(schedules);
   } catch (error) {
     res.status(500).json({
-      message: "Error fetching your registered schedules",
+      message: "Lỗi lấy lịch hẹn đã đăng ký",
       error: error.message
+    });
+  }
+};
+
+// Make cancelled schedule available again
+export const makeScheduleAvailable = async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+    const doctorId = req.doctor._id;
+
+    // Find schedule and check ownership
+    const schedule = await Schedule.findOne({
+      _id: scheduleId,
+      doctor: doctorId
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ 
+        message: "Không tìm thấy lịch hẹn hoặc không có quyền truy cập" 
+      });
+    }
+
+    if (schedule.status !== "cancelled") {
+      return res.status(400).json({ 
+        message: "Chỉ có thể kích hoạt lại lịch hẹn đã bị hủy" 
+      });
+    }
+
+    // Check if the schedule date is in the past
+    if (new Date(schedule.date) < new Date()) {
+      return res.status(400).json({
+        message: "Không thể kích hoạt lại lịch hẹn đã qua"
+      });
+    }
+
+    // Reset schedule data
+    schedule.status = "available";
+    schedule.isAvailable = true;
+    schedule.patient = null;
+    schedule.cancelReason = null;
+
+    await schedule.save();
+
+    res.status(200).json({
+      message: "Kích hoạt lại lịch hẹn thành công",
+      schedule
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Lỗi kích hoạt lại lịch hẹn", 
+      error: error.message 
     });
   }
 };

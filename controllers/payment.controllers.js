@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 // Package pricing configuration
 const PACKAGE_PRICES = {
   silver: {
-    1: 99000,   // 1 month
+    1: 3000,   // 1 month
     3: 279000,  // 3 months (5% discount)
     6: 534000,  // 6 months (10% discount)
     12: 1009000 // 12 months (15% discount)
