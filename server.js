@@ -8,6 +8,7 @@ import connectDB from './config/connectDB.js';
 import userRoutes from "./routes/user.routes.js";
 import doctorRoutes from "./routes/doctor.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
+import scheduleRoutes from "./routes/schedule.routes.js";
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/users', userRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/schedules', scheduleRoutes);
 
 // Default route (for "/")
 app.get('/', (req, res) => {
