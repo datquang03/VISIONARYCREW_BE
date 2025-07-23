@@ -12,8 +12,8 @@ export const registerDoctor = async (req, res) => {
     const {
       username, email, phone, dateOfBirth, password,
       fullName, address, doctorType,
-      certifications, education, workExperience,
-      workplace, description,
+      certifications, education, workExperience,description,
+      recentJob,
     } = req.body;
 
     if (!username || !email || !phone || !dateOfBirth || !password || !fullName || !address || !doctorType) {
@@ -58,13 +58,30 @@ export const registerDoctor = async (req, res) => {
       }));
     }
 
+    // Parse education
     let parsedEducation = [];
+    if (Array.isArray(education)) {
+      parsedEducation = education;
+    } else if (typeof education === "string") {
+      try {
+        parsedEducation = JSON.parse(education);
+      } catch (e) {
+        parsedEducation = [];
+      }
+    }
+    // Parse workExperience
     let parsedWorkExperience = [];
-    try { parsedEducation = education ? JSON.parse(education) : []; } catch (e) {}
-    try { parsedWorkExperience = workExperience ? JSON.parse(workExperience) : []; } catch (e) {}
+    if (Array.isArray(workExperience)) {
+      parsedWorkExperience = workExperience;
+    } else if (typeof workExperience === "string") {
+      try {
+        parsedWorkExperience = JSON.parse(workExperience);
+      } catch (e) {
+        parsedWorkExperience = [];
+      }
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const doctorRegisterId = new mongoose.Types.ObjectId().toString();
 
     const doctor = new Doctor({
       username, email, phone, dateOfBirth, password: hashedPassword,
@@ -72,12 +89,11 @@ export const registerDoctor = async (req, res) => {
       certifications: parsedCertifications,
       education: parsedEducation,
       workExperience: parsedWorkExperience,
-      workplace: workplace || null,
       description: description || null,
+      recentJob: recentJob || null,
       role: "doctor",
       isVerified: false,
       doctorApplicationStatus: "pending",
-      doctorRegisterId,
       avatar: avatarUrl,
     });
 
@@ -97,7 +113,7 @@ export const reRegisterDoctor = async (req, res) => {
     const {
       doctorId, fullName, address, doctorType,
       certifications, education, workExperience,
-      workplace, description,
+      recentJob,
     } = req.body;
 
     if (!doctorId || !fullName || !address || !doctorType) {
@@ -107,9 +123,9 @@ export const reRegisterDoctor = async (req, res) => {
     const doctor = await Doctor.findById(doctorId);
     if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
 
-    if (doctor.doctorApplicationStatus !== 'rejected') {
+    if (!['pending', 'rejected'].includes(doctor.doctorApplicationStatus)) {
       return res.status(400).json({
-        message: `Chỉ những bác sĩ bị từ chối mới có thể đăng ký lại. Trạng thái hiện tại: ${doctor.doctorApplicationStatus}`,
+        message: `Chỉ những bác sĩ đang chờ duyệt hoặc bị từ chối mới có thể đăng ký lại. Trạng thái hiện tại: ${doctor.doctorApplicationStatus}`,
       });
     }
 
@@ -133,10 +149,28 @@ export const reRegisterDoctor = async (req, res) => {
       }));
     }
 
+    // Parse education
     let parsedEducation = [];
+    if (Array.isArray(education)) {
+      parsedEducation = education;
+    } else if (typeof education === "string") {
+      try {
+        parsedEducation = JSON.parse(education);
+      } catch (e) {
+        parsedEducation = [];
+      }
+    }
+    // Parse workExperience
     let parsedWorkExperience = [];
-    try { parsedEducation = education ? JSON.parse(education) : []; } catch (e) {}
-    try { parsedWorkExperience = workExperience ? JSON.parse(workExperience) : []; } catch (e) {}
+    if (Array.isArray(workExperience)) {
+      parsedWorkExperience = workExperience;
+    } else if (typeof workExperience === "string") {
+      try {
+        parsedWorkExperience = JSON.parse(workExperience);
+      } catch (e) {
+        parsedWorkExperience = [];
+      }
+    }
 
     doctor.fullName = fullName;
     doctor.address = address;
@@ -144,8 +178,8 @@ export const reRegisterDoctor = async (req, res) => {
     doctor.certifications = parsedCertifications;
     doctor.education = parsedEducation;
     doctor.workExperience = parsedWorkExperience;
-    doctor.workplace = workplace || null;
-    doctor.description = description || null;
+    doctor.description = null;
+    doctor.recentJob = recentJob || null;
     doctor.doctorApplicationStatus = "pending";
     doctor.rejectionMessage = null;
     doctor.isVerified = false;
@@ -209,10 +243,9 @@ export const login = async (req, res) => {
         fullName: doctor.fullName,
         role: doctor.role,
         doctorType: doctor.doctorType,
-        workplace: doctor.workplace,
+        workplace: null,
         token,
         balance: doctor.balance,
-        doctorRegisterId: doctor.doctorRegisterId,
         doctorApplicationStatus: doctor.doctorApplicationStatus,
         rejectionMessage: doctor.rejectionMessage || null,
       },
@@ -241,6 +274,86 @@ export const getMyProfile = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+// update profile
+export const updateProfile = async (req, res) => {
+  try {
+    const doctorId = req.doctor._id;
+
+    const {
+      fullName,
+      address,
+      phone,
+      dateOfBirth,
+      doctorType,
+      description,
+      certifications,
+      education,
+      workExperience,
+      recentJob,
+    } = req.body;
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
+
+    // Update avatar if provided
+    if (req.files?.length > 0) {
+      const avatarFile = req.files.find((file) => file.fieldname === "avatar");
+      if (avatarFile) {
+        doctor.avatar = await uploadImage(avatarFile.buffer, "doctor_avatars");
+      }
+    }
+
+    // Parse certifications
+    let parsedCertifications = [];
+    try {
+      parsedCertifications = certifications ? JSON.parse(certifications) : [];
+    } catch (e) {
+      console.error("Certification parse error", e);
+    }
+
+    const certFiles = req.files?.filter((f) => f.fieldname === "certificationImages") || [];
+    if (certFiles.length > 0) {
+      const urls = await uploadMultipleImages(certFiles.map(f => f.buffer), "doctor_certifications");
+      parsedCertifications = parsedCertifications.map((cert, idx) => ({
+        ...cert,
+        url: urls[idx] || cert.url,
+        uploadedAt: cert.uploadedAt || new Date(),
+      }));
+    }
+
+    // Parse education and work experience
+    let parsedEducation = [];
+    let parsedWorkExperience = [];
+    try { parsedEducation = education ? JSON.parse(education) : []; } catch (e) {}
+    try { parsedWorkExperience = workExperience ? JSON.parse(workExperience) : []; } catch (e) {}
+
+    // Update fields
+    doctor.fullName = fullName || doctor.fullName;
+    doctor.address = address || doctor.address;
+    doctor.phone = phone || doctor.phone;
+    doctor.dateOfBirth = dateOfBirth || doctor.dateOfBirth;
+    doctor.doctorType = doctorType || doctor.doctorType;
+    doctor.description = description || doctor.description;
+    doctor.certifications = parsedCertifications;
+    doctor.education = parsedEducation;
+    doctor.workExperience = parsedWorkExperience;
+    doctor.recentJob = recentJob || doctor.recentJob;
+
+    await doctor.save();
+
+    res.status(200).json({
+      message: "Cập nhật thông tin cá nhân thành công",
+      doctor: {
+        ...doctor.toObject(),
+        dateOfBirth: doctor.dateOfBirth ? formatDate(doctor.dateOfBirth) : null,
+        updatedAt: formatDate(doctor.updatedAt),
+      },
+    });
+  } catch (error) {
+    console.error("Update doctor profile error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 // Get all
 export const getAllDoctors = async (req, res) => {
@@ -263,20 +376,32 @@ export const getAllDoctors = async (req, res) => {
 // Get by register ID
 export const getDoctorByRegisterId = async (req, res) => {
   try {
-    const doctor = await Doctor.findOne({ doctorRegisterId: req.params.doctorRegisterId });
-    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ với ID đăng ký này." });
+    // Lấy doctor theo _id của người đang đăng nhập
+    const doctor = await Doctor.findById(req.doctor._id);
+    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
 
     res.status(200).json({
       message: "Lấy thông tin thành công",
-      doctorId: doctor._id,
-      status: doctor.doctorApplicationStatus,
-      rejectionMessage: doctor.rejectionMessage || null,
-      submittedAt: formatDate(doctor.createdAt),
-      updatedAt: formatDate(doctor.updatedAt),
-      fullName: doctor.fullName,
-      avatar: doctor.avatar,
-      doctorType: doctor.doctorType,
-      workplace: doctor.workplace,
+      doctor: {
+        doctorId: doctor._id,
+        username: doctor.username,
+        email: doctor.email,
+        phone: doctor.phone,
+        dateOfBirth: doctor.dateOfBirth,
+        fullName: doctor.fullName,
+        address: doctor.address,
+        doctorType: doctor.doctorType,
+        certifications: doctor.certifications,
+        education: doctor.education,
+        workExperience: doctor.workExperience,
+        description: doctor.description,
+        avatar: doctor.avatar,
+        status: doctor.doctorApplicationStatus,
+        rejectionMessage: doctor.rejectionMessage || null,
+        submittedAt: formatDate(doctor.createdAt),
+        updatedAt: formatDate(doctor.updatedAt),
+        recentJob: doctor.recentJob,
+      }
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -304,19 +429,25 @@ export const getPendingDoctor = async (req, res) => {
     const doctors = await Doctor.find({ doctorApplicationStatus: "pending" });
     res.status(200).json({
       message: `Có tổng ${doctors.length} bác sĩ đang chờ xét duyệt`,
-      pendingDoctors: doctors.map((d) => ({
-        id: d._id,
-        fullName: d.fullName,
-        avatar: d.avatar,
-        doctorType: d.doctorType,
-        phone: d.phone,
-        dateOfBirth: d.dateOfBirth ? formatDate(d.dateOfBirth) : null,
-        workplace: d.workplace,
-        doctorRegisterId: d.doctorRegisterId,
-        doctorApplicationStatus: d.doctorApplicationStatus,
-        rejectionMessage: d.rejectionMessage || null,
-        createdAt: formatDate(d.createdAt),
-        updatedAt: formatDate(d.updatedAt),
+      pendingDoctors: doctors.map((doctor) => ({
+        id: doctor._id,
+        username: doctor.username,
+        email: doctor.email,
+        phone: doctor.phone,
+        dateOfBirth: doctor.dateOfBirth,
+        fullName: doctor.fullName,
+        address: doctor.address,
+        doctorType: doctor.doctorType,
+        certifications: doctor.certifications,
+        education: doctor.education,
+        workExperience: doctor.workExperience,
+        description: doctor.description,
+        avatar: doctor.avatar,
+        status: doctor.doctorApplicationStatus,
+        rejectionMessage: doctor.rejectionMessage || null,
+        submittedAt: formatDate(doctor.createdAt),
+        updatedAt: formatDate(doctor.updatedAt),
+        recentJob: doctor.recentJob,
       })),
     });
   } catch (error) {
@@ -342,6 +473,7 @@ export const getDoctorById = async (req, res) => {
         dateOfBirth: doctor.dateOfBirth ? formatDate(doctor.dateOfBirth) : null,
         createdAt: formatDate(doctor.createdAt),
         updatedAt: formatDate(doctor.updatedAt),
+        recentJob: doctor.recentJob,
       },
     });
   } catch (error) {
@@ -521,7 +653,6 @@ export const getAllDoctorsWithPriority = async (req, res) => {
       message: `Có tổng ${doctors.length} bác sĩ`,
       doctors: doctors.map((doctor) => ({
         ...doctor.toObject(),
-        doctorRegisterId: doctor.doctorRegisterId,
       })),
       totalDoctors,
     });

@@ -179,7 +179,7 @@ export const createPackagePayment = async (req, res) => {
       status: "PENDING",
     });
 
-    // PayOS payment data with short description
+    // PayOS payment data with short description 
     const paymentData = {
       orderCode: orderCode,
       amount: amount,

@@ -33,6 +33,14 @@ export const protectRouter = asyncHandler(async (req, res, next) => {
     return res.status(401).json({ message: "Chưa đăng nhập" });
   }
 });
+// Admin middleware (User model)
+export const admin = asyncHandler(async (req, res, next) => {
+  if (req.user && req.user.role === "admin") {
+    next();
+  } else {
+    res.status(403).json({ message: "Chỉ dành cho admin" });
+  }
+});
 
 // Protect router for doctors (Doctor model)
 export const protectRouterForDoctor = asyncHandler(async (req, res, next) => {
@@ -63,14 +71,6 @@ export const protectRouterForDoctor = asyncHandler(async (req, res, next) => {
   }
 });
 
-// Admin middleware (User model)
-export const admin = asyncHandler(async (req, res, next) => {
-  if (req.user && req.user.role === "admin") {
-    next();
-  } else {
-    res.status(403).json({ message: "Chỉ dành cho admin" });
-  }
-});
 
 
 

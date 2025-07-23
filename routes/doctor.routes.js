@@ -14,6 +14,7 @@ import {
   incrementScheduleUsage,
   getAllDoctorsWithPriority,
   deleteDoctorByRegisterId,
+  updateProfile,
 } from "../controllers/doctor.controllers.js";
 import { 
   admin, 
@@ -62,31 +63,31 @@ const uploadAny = upload.any();
 
 const router = express.Router();
 
-// Authentication routes
+// ===== PUBLIC ROUTES =====
 router.post("/login", login);
-router.get("/pending", getPendingDoctor);
-
-// Doctor registration routes
 router.get("/", getAllDoctors);
-router.get("/pending",getPendingDoctor);
+router.get("/list/priority", getAllDoctorsWithPriority);
 router.post("/register", uploadAny, handleMulterError, registerDoctor);
-router.post("/reregister", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, uploadAny, handleMulterError, reRegisterDoctor);
 
-// Doctor profile routes
-router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
-router.get("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, getMyProfile);
-router.get("/register/:doctorRegisterId", protectRouterForDoctor, allowOnlyPendingOrRejectedDoctor, getDoctorByRegisterId);
-router.get("/:id", protectRouterForDoctor, getDoctorById);
-
-// Doctor list and management routes
+// ===== ADMIN ROUTES =====
+router.get("/pending",protectRouter,admin, getPendingDoctor); // public getPendingDoctor (if needed, move to admin below)
 router.patch("/handle", protectRouter, admin, handleDoctorApplication);
+// ===== DOCTOR AUTHENTICATED ROUTES (any doctor, any status) =====
+router.get("/register", protectRouterForDoctor, getDoctorByRegisterId);
+router.get("/:id", protectRouterForDoctor, getDoctorById);
+router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
 
-// Subscription and package related routes
+// ===== PENDING OR REJECTED DOCTOR ROUTES =====
+router.post("/reregister", protectRouterForDoctor, uploadAny, handleMulterError, reRegisterDoctor);
+
+// ===== ACCEPTED DOCTOR ROUTES =====
+router.get("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, getMyProfile);
+router.put("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, uploadAny, handleMulterError, updateProfile);
+
+// ===== DOCTOR SUBSCRIPTION (require doctor, any status) =====
 router.get("/subscription/my", protectDoctorRouter, getMySubscription);
 router.get("/subscription/check", protectDoctorRouter, checkScheduleAvailability);
 router.post("/subscription/increment", protectDoctorRouter, incrementScheduleUsage);
 
-// Updated route for prioritized doctor listing
-router.get("/list/priority", getAllDoctorsWithPriority);
 
 export default router;

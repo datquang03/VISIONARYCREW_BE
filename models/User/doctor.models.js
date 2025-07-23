@@ -80,7 +80,7 @@ const doctorSchema = new mongoose.Schema(
     // Doctor-specific fields
     doctorType: {
       type: String,
-      enum: ["general", "cardiologist", "dermatologist", "pediatrician", "other"],
+      trim: true,
       default: null,
     },
     certifications: [
@@ -104,11 +104,6 @@ const doctorSchema = new mongoose.Schema(
       enum: ["pending", "accepted", "rejected", null],
       default: null,
     },
-    doctorRegisterId: {
-      type: String,
-      unique: true,
-      required: true,
-    },    
     rejectionMessage: {
       type: String,
       trim: true,
@@ -158,11 +153,6 @@ const doctorSchema = new mongoose.Schema(
         },
       },
     ],
-    workplace: {
-      type: String,
-      trim: true,
-      default: null,
-    },
     // Subscription package fields
     subscriptionPackage: {
       type: String,
@@ -199,6 +189,11 @@ const doctorSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    recentJob: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
 {
   timestamps: true,
@@ -206,4 +201,4 @@ const doctorSchema = new mongoose.Schema(
 );
 
 const Doctor = mongoose.model("Doctor", doctorSchema);
-export default Doctor;
+export default Doctor;  
