@@ -33,7 +33,7 @@ const paymentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["PENDING", "PAID", "CANCELLED", "EXPIRED"],
+      enum: ["PENDING", "PAID", "CANCELLED", "EXPIRED", "FAILED"],
       default: "PENDING",
     },
     paymentMethod: {
@@ -52,8 +52,17 @@ const paymentSchema = new mongoose.Schema(
     cancelledAt: {
       type: Date,
     },
+    cancelReason: {
+      type: String,
+    },
     expiredAt: {
       type: Date,
+    },
+    failedAt: {
+      type: Date,
+    },
+    failureReason: {
+      type: String,
     },
   },
   {
