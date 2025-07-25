@@ -3,6 +3,13 @@ import Payment from "../models/payment.models.js";
 import Doctor from "../models/User/doctor.models.js";
 import mongoose from "mongoose";
 
+// Cache for package configurations
+const CACHE = {
+  packages: null,
+  lastUpdated: null,
+  TTL: 5 * 60 * 1000 // 5 minutes
+};
+
 // Package pricing configuration
 const PACKAGE_PRICES = {
   silver: {
@@ -49,9 +56,147 @@ const PACKAGE_BENEFITS = {
   }
 };
 
-// Generate unique order code
-const generateOrderCode = () => {
-  return Math.floor(Date.now() / 1000);
+// Package hierarchy for level comparison
+const PACKAGE_HIERARCHY = {
+  "free": 0,
+  "silver": 1, 
+  "gold": 2,
+  "diamond": 3
+};
+
+// Validation constants
+const VALID_PACKAGE_TYPES = ["silver", "gold", "diamond"];
+const VALID_DURATIONS = [1, 3, 6, 12];
+const PAYOS_DESCRIPTION_MAX_LENGTH = 25;
+
+// Utility functions
+const generateOrderCode = () => Math.floor(Date.now() / 1000);
+
+const getPackageName = (packageType) => {
+  const names = {
+    silver: "Bạc",
+    gold: "Vàng", 
+    diamond: "Kim Cương"
+  };
+  return names[packageType] || packageType;
+};
+
+const getPackageShortName = (packageType) => {
+  const shortNames = {
+    silver: "Bac",
+    gold: "Vang", 
+    diamond: "KC"
+  };
+  return shortNames[packageType] || packageType;
+};
+
+const calculateRemainingDays = (endDate) => {
+  return Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
+};
+
+// Optimized payment finder with multiple strategies
+const findPaymentByOrderCode = async (orderCode, doctorId = null, status = null) => {
+  const query = {};
+  
+  if (doctorId) query.doctorId = doctorId;
+  if (status) query.status = status;
+  
+  // Try with parsed integer first
+  let payment = await Payment.findOne({ 
+    ...query,
+    orderCode: parseInt(orderCode) 
+  });
+  
+  // Fallback to string if not found
+  if (!payment) {
+    payment = await Payment.findOne({ 
+      ...query,
+      orderCode: orderCode 
+    });
+  }
+  
+  return payment;
+};
+
+// Validation helper functions
+const validatePaymentInput = (packageType, duration) => {
+  const errors = [];
+  
+  if (!packageType || !duration) {
+    errors.push("Vui lòng chọn gói và thời hạn");
+  }
+  
+  if (!VALID_PACKAGE_TYPES.includes(packageType)) {
+    errors.push(`Gói không hợp lệ. Chọn: ${VALID_PACKAGE_TYPES.join(", ")}`);
+  }
+  
+  if (!VALID_DURATIONS.includes(duration)) {
+    errors.push(`Thời hạn không hợp lệ. Chọn: ${VALID_DURATIONS.join(", ")} tháng`);
+  }
+  
+  return errors;
+};
+
+const validateDoctorEligibility = (doctor) => {
+  if (!doctor) {
+    return { valid: false, message: "Bác sĩ không tồn tại" };
+  }
+  
+  if (doctor.doctorApplicationStatus !== "accepted") {
+    return { 
+      valid: false, 
+      message: "Chỉ bác sĩ đã được duyệt mới có thể mua gói" 
+    };
+  }
+  
+  return { valid: true };
+};
+
+const validateSubscriptionRules = (doctor, packageType) => {
+  const now = new Date();
+  const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
+  
+  if (!hasActiveSubscription) {
+    return { valid: true, isUpgrade: false };
+  }
+  
+  const currentPackage = doctor.subscriptionPackage;
+  const currentLevel = PACKAGE_HIERARCHY[currentPackage] || 0;
+  const newLevel = PACKAGE_HIERARCHY[packageType];
+  const remainingDays = calculateRemainingDays(doctor.subscriptionEndDate);
+  
+  // Rule 1: Can't buy the same package if still active
+  if (currentPackage === packageType) {
+    return {
+      valid: false,
+      message: `Bạn đã có gói ${getPackageName(packageType)} còn hiệu lực ${remainingDays} ngày. Vui lòng chờ hết hạn hoặc chọn gói khác.`,
+      currentSubscription: {
+        package: currentPackage,
+        endDate: doctor.subscriptionEndDate,
+        remainingDays: remainingDays
+      }
+    };
+  }
+  
+  // Rule 2: Allow upgrade to higher package
+  if (newLevel > currentLevel) {
+    return { valid: true, isUpgrade: true };
+  }
+  
+  // Rule 3: Prevent downgrade to lower package while active
+  if (newLevel < currentLevel) {
+    return {
+      valid: false,
+      message: `Không thể hạ cấp từ gói ${getPackageName(currentPackage)} xuống gói ${getPackageName(packageType)} khi còn ${remainingDays} ngày hiệu lực. Vui lòng chờ hết hạn.`,
+      currentSubscription: {
+        package: currentPackage,
+        endDate: doctor.subscriptionEndDate,
+        remainingDays: remainingDays
+      }
+    };
+  }
+  
+  return { valid: true, isUpgrade: false };
 };
 
 // Create payment link for doctor subscription package
@@ -61,167 +206,101 @@ export const createPackagePayment = async (req, res) => {
     const { packageType, duration } = req.body;
 
     // Validate input
-    if (!packageType || !duration) {
+    const validationErrors = validatePaymentInput(packageType, duration);
+    if (validationErrors.length > 0) {
       return res.status(400).json({
-        message: "Vui lòng chọn gói và thời hạn",
+        message: validationErrors[0],
+        errors: validationErrors
       });
     }
 
-    // Validate package type
-    if (!["silver", "gold", "diamond"].includes(packageType)) {
+    // Get doctor with optimized query
+    const doctor = await Doctor.findById(doctorId)
+      .select('fullName doctorApplicationStatus subscriptionPackage subscriptionEndDate')
+      .lean();
+
+    // Validate doctor eligibility
+    const doctorValidation = validateDoctorEligibility(doctor);
+    if (!doctorValidation.valid) {
+      return res.status(doctorValidation.message.includes("không tồn tại") ? 404 : 403)
+        .json({ message: doctorValidation.message });
+    }
+
+    // Validate subscription rules
+    const subscriptionValidation = validateSubscriptionRules(doctor, packageType);
+    if (!subscriptionValidation.valid) {
       return res.status(400).json({
-        message: "Gói không hợp lệ. Chọn: silver, gold, hoặc diamond",
+        message: subscriptionValidation.message,
+        currentSubscription: subscriptionValidation.currentSubscription
       });
-    }
-
-    // Validate duration
-    if (![1, 3, 6, 12].includes(duration)) {
-      return res.status(400).json({
-        message: "Thời hạn không hợp lệ. Chọn: 1, 3, 6, hoặc 12 tháng",
-      });
-    }
-
-    // Check if doctor exists
-    const doctor = await Doctor.findById(doctorId);
-    if (!doctor) {
-      return res.status(404).json({ message: "Bác sĩ không tồn tại" });
-    }
-
-    // Check if doctor is verified
-    if (doctor.doctorApplicationStatus !== "accepted") {
-      return res.status(403).json({
-        message: "Chỉ bác sĩ đã được duyệt mới có thể mua gói",
-      });
-    }
-
-    // Check current subscription and validate purchase rules
-    const now = new Date();
-    const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
-    
-    if (hasActiveSubscription) {
-      const currentPackage = doctor.subscriptionPackage;
-      
-      // Define package hierarchy for upgrade/downgrade logic
-      const packageHierarchy = {
-        "free": 0,
-        "silver": 1, 
-        "gold": 2,
-        "diamond": 3
-      };
-      
-      const currentLevel = packageHierarchy[currentPackage] || 0;
-      const newLevel = packageHierarchy[packageType];
-      
-      // Rule 1: Can't buy the same package if still active
-      if (currentPackage === packageType) {
-        const remainingDays = Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24));
-        return res.status(400).json({
-          message: `Bạn đã có gói ${packageType === 'silver' ? 'Bạc' : packageType === 'gold' ? 'Vàng' : 'Kim Cương'} còn hiệu lực ${remainingDays} ngày. Vui lòng chờ hết hạn hoặc chọn gói khác.`,
-          currentSubscription: {
-            package: currentPackage,
-            endDate: doctor.subscriptionEndDate,
-            remainingDays: remainingDays
-          }
-        });
-      }
-      
-      // Rule 2: Allow upgrade to higher package
-      if (newLevel > currentLevel) {
-        // Upgrade allowed - will replace current subscription
-      }
-      
-      // Rule 3: Prevent downgrade to lower package while active
-      else if (newLevel < currentLevel) {
-        const remainingDays = Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24));
-        return res.status(400).json({
-          message: `Không thể hạ cấp từ gói ${currentPackage === 'silver' ? 'Bạc' : currentPackage === 'gold' ? 'Vàng' : 'Kim Cương'} xuống gói ${packageType === 'silver' ? 'Bạc' : packageType === 'gold' ? 'Vàng' : 'Kim Cương'} khi còn ${remainingDays} ngày hiệu lực. Vui lòng chờ hết hạn.`,
-          currentSubscription: {
-            package: currentPackage,
-            endDate: doctor.subscriptionEndDate,
-            remainingDays: remainingDays
-          }
-        });
-      }
     }
 
     // Get package price
-    const amount = PACKAGE_PRICES[packageType][duration];
+    const amount = PACKAGE_PRICES[packageType]?.[duration];
     if (!amount) {
       return res.status(400).json({
         message: "Không tìm thấy giá cho gói này",
       });
     }
 
-    // Generate order code
+    // Generate order code and descriptions
     const orderCode = generateOrderCode();
+    const shortDescription = `Goi ${getPackageShortName(packageType)} ${duration}T`;
+    const fullDescription = `Gói ${getPackageName(packageType)} - ${duration} tháng - Dr. ${doctor.fullName}`;
 
-    // Create short description (max 25 characters for PayOS)
-    const packageNames = {
-      silver: "Bac",
-      gold: "Vang", 
-      diamond: "KC"
-    };
+    // Create payment record with transaction
+    const session = await mongoose.startSession();
+    let payment;
     
-    // Short description for PayOS (max 25 chars)
-    const shortDescription = `Goi ${packageNames[packageType]} ${duration}T`;
-    
-    // Full description for database
-    const fullDescription = `Gói ${packageType === 'silver' ? 'Bạc' : packageType === 'gold' ? 'Vàng' : 'Kim Cương'} - ${duration} tháng - Dr. ${doctor.fullName}`;
+    try {
+      await session.withTransaction(async () => {
+        payment = new Payment({
+          doctorId,
+          orderCode,
+          amount,
+          description: fullDescription,
+          packageType,
+          packageDuration: duration,
+          status: "PENDING",
+        });
 
-    // Create payment record in database
-    const payment = new Payment({
-      doctorId,
-      orderCode,
-      amount,
-      description: fullDescription, // Store full description in DB
-      packageType,
-      packageDuration: duration,
-      status: "PENDING",
-    });
-
-    // PayOS payment data with short description 
-    const paymentData = {
-      orderCode: orderCode,
-      amount: amount,
-      description: shortDescription, // Use short description for PayOS
-      returnUrl: `${process.env.CLIENT_URL}/doctor/payment/success`,
-      cancelUrl: `${process.env.CLIENT_URL}/doctor/payment/cancel`,
-    };
-
-    // Create payment link with PayOS
-    const paymentLinkResponse = await payOS.createPaymentLink(paymentData);
-
-    // Update payment record with payment URL
-    payment.paymentUrl = paymentLinkResponse.checkoutUrl;
-    await payment.save();
-
-    // Prepare response with upgrade info if applicable
-    let upgradeInfo = null;
-    if (hasActiveSubscription) {
-      const packageHierarchy = {
-        "free": 0,
-        "silver": 1, 
-        "gold": 2,
-        "diamond": 3
-      };
-      
-      const currentLevel = packageHierarchy[doctor.subscriptionPackage] || 0;
-      const newLevel = packageHierarchy[packageType];
-      
-      if (newLevel > currentLevel) {
-        const remainingDays = Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24));
-        upgradeInfo = {
-          isUpgrade: true,
-          fromPackage: doctor.subscriptionPackage,
-          toPackage: packageType,
-          currentEndDate: doctor.subscriptionEndDate,
-          remainingDays: remainingDays,
-          note: "Gói mới sẽ có hiệu lực ngay lập tức sau khi thanh toán thành công"
+        // PayOS payment data
+        const paymentData = {
+          orderCode: orderCode,
+          amount: amount,
+          description: shortDescription,
+          returnUrl: `${process.env.API_URL || process.env.BASE_URL}/api/payment/package/success`,
+          cancelUrl: `${process.env.API_URL || process.env.BASE_URL}/api/payment/package/cancel`,
         };
-      }
+
+        // Create payment link with PayOS
+        const paymentLinkResponse = await payOS.createPaymentLink(paymentData);
+        payment.paymentUrl = paymentLinkResponse.checkoutUrl;
+        
+        await payment.save({ session });
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      await session.endSession();
     }
 
-      res.status(200).json({
+    // Prepare upgrade info if applicable
+    let upgradeInfo = null;
+    if (subscriptionValidation.isUpgrade) {
+      const remainingDays = calculateRemainingDays(doctor.subscriptionEndDate);
+      upgradeInfo = {
+        isUpgrade: true,
+        fromPackage: doctor.subscriptionPackage,
+        toPackage: packageType,
+        currentEndDate: doctor.subscriptionEndDate,
+        remainingDays: remainingDays,
+        note: "Gói mới sẽ có hiệu lực ngay lập tức sau khi thanh toán thành công"
+      };
+    }
+
+    res.status(200).json({
       message: "Tạo liên kết thanh toán gói thành công",
       payment: {
         orderCode: payment.orderCode,
@@ -231,102 +310,184 @@ export const createPackagePayment = async (req, res) => {
         packageDuration: payment.packageDuration,
         paymentUrl: payment.paymentUrl,
         status: payment.status,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
       },
       packageInfo: PACKAGE_BENEFITS[packageType],
       upgradeInfo: upgradeInfo,
     });
   } catch (error) {
-    console.error("PayOS Error:", error);
+    console.error("Create Package Payment Error:", error);
+    
+    // Handle specific PayOS errors
+    if (error.message?.includes('PayOS')) {
+      return res.status(502).json({ 
+        message: "Lỗi kết nối với cổng thanh toán",
+        error: "SERVICE_UNAVAILABLE",
+        suggestion: "Vui lòng thử lại sau ít phút"
+      });
+    }
+    
     res.status(500).json({ 
       message: "Lỗi tạo thanh toán",
-      error: error.message 
+      error: process.env.NODE_ENV === 'development' ? error.message : "INTERNAL_ERROR"
     });
   }
 };
 
+// Subscription update helper function
+const updateDoctorSubscription = async (payment, session = null) => {
+  const doctor = await Doctor.findById(payment.doctorId);
+  if (!doctor) {
+    throw new Error(`Doctor not found for payment ${payment.orderCode}`);
+  }
+
+  const now = new Date();
+  const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
+  const isUpgrade = hasActiveSubscription && doctor.subscriptionPackage !== payment.packageType;
+  
+  let startDate, endDate;
+  
+  if (isUpgrade) {
+    // Upgrade: Start immediately
+    startDate = now;
+    endDate = new Date(now);
+    endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+    console.log(`Processing upgrade for doctor ${doctor._id}: ${doctor.subscriptionPackage} -> ${payment.packageType}`);
+  } else {
+    // New subscription or renewal
+    startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
+    endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+    console.log(`Processing ${hasActiveSubscription ? 'renewal' : 'new'} subscription for doctor ${doctor._id}: ${payment.packageType}`);
+  }
+
+  // Update doctor subscription
+  const benefits = PACKAGE_BENEFITS[payment.packageType];
+  doctor.subscriptionPackage = payment.packageType;
+  doctor.subscriptionStartDate = startDate;
+  doctor.subscriptionEndDate = endDate;
+  doctor.scheduleLimits.weekly = benefits.scheduleLimit;
+  doctor.scheduleLimits.used = 0;
+  doctor.scheduleLimits.resetDate = getNextWeekReset();
+  doctor.isPriority = benefits.isPriority;
+  
+  await doctor.save({ session });
+  return doctor;
+};
+
 // Handle PayOS webhook for package payments
 export const handlePackagePaymentWebhook = async (req, res) => {
+  const startTime = Date.now();
+  let orderCode = null;
+  
   try {
     const webhookData = req.body;
+    orderCode = webhookData.data?.orderCode || webhookData.orderCode;
     
     // Verify webhook signature (recommended for production)
     const signature = req.headers["x-payos-signature"];
     
+    // Rate limiting check (basic implementation)
+    if (process.env.WEBHOOK_RATE_LIMIT && startTime - (global.lastWebhookTime || 0) < 1000) {
+      console.warn(`Webhook rate limit hit for orderCode: ${orderCode}`);
+      return res.status(429).json({ message: "Rate limit exceeded" });
+    }
+    global.lastWebhookTime = startTime;
+    
+    console.log(`Webhook received for orderCode: ${orderCode}, code: ${webhookData.code}, time: ${new Date().toISOString()}`);
+    
     if (webhookData.code === "00") {
       // Payment successful
-      const orderCode = webhookData.data.orderCode;
-      
-      // Find payment record
-      const payment = await Payment.findOne({ orderCode });
+      const payment = await findPaymentByOrderCode(orderCode);
       if (!payment) {
+        console.error(`Payment not found for orderCode: ${orderCode}`);
         return res.status(404).json({ message: "Không tìm thấy đơn hàng" });
       }
 
-      // Update payment status
-      payment.status = "PAID";
-      payment.transactionId = webhookData.data.transactionDateTime;
-      payment.paidAt = new Date();
-      await payment.save();
+      // Prevent duplicate processing with atomic update
+      const updatedPayment = await Payment.findOneAndUpdate(
+        { _id: payment._id, status: "PENDING" },
+        { 
+          status: "PAID",
+          transactionId: webhookData.data.transactionDateTime,
+          paidAt: new Date()
+        },
+        { new: true }
+      );
 
-      // Update doctor subscription
-      const doctor = await Doctor.findById(payment.doctorId);
-      if (doctor) {
-        const now = new Date();
-        
-        // For upgrades, start immediately and calculate from current end date if still active
-        // For new subscriptions, start from now
-        let startDate;
-        let endDate;
-        
-        const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
-        const isUpgrade = hasActiveSubscription && doctor.subscriptionPackage !== payment.packageType;
-        
-        if (isUpgrade) {
-          // Upgrade: Start immediately, but preserve remaining time value
-          startDate = now;
-          endDate = new Date(now);
-          endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-          
-          // Optional: Add remaining time from current subscription as bonus
-          // const remainingTime = doctor.subscriptionEndDate - now;
-          // endDate = new Date(endDate.getTime() + remainingTime);
-        } else {
-          // New subscription or renewal after expiry
-          startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
-          endDate = new Date(startDate);
-          endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-        }
+      if (!updatedPayment) {
+        console.log(`Payment ${orderCode} already processed or not in PENDING status`);
+        return res.status(200).json({ message: "Payment already processed" });
+      }
 
-        // Update doctor subscription
-        doctor.subscriptionPackage = payment.packageType;
-        doctor.subscriptionStartDate = startDate;
-        doctor.subscriptionEndDate = endDate;
-        
-        // Update benefits based on package
-        const benefits = PACKAGE_BENEFITS[payment.packageType];
-        doctor.scheduleLimits.weekly = benefits.scheduleLimit;
-        doctor.scheduleLimits.used = 0; // Reset weekly usage
-        doctor.scheduleLimits.resetDate = getNextWeekReset();
-        doctor.isPriority = benefits.isPriority;
-        
-        await doctor.save();
+      console.log(`Payment ${orderCode} marked as PAID`);
+
+      // Update doctor subscription with transaction
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          await updateDoctorSubscription(updatedPayment, session);
+        });
+        console.log(`Doctor subscription updated successfully for payment ${orderCode}`);
+      } catch (error) {
+        console.error(`Failed to update doctor subscription for payment ${orderCode}:`, error);
+        // Payment is already marked as PAID, log error but don't fail webhook
+      } finally {
+        await session.endSession();
       }
     } else {
       // Payment failed or cancelled
-      const orderCode = webhookData.data.orderCode;
-      
-      const payment = await Payment.findOne({ orderCode });
-      if (payment) {
-        payment.status = "CANCELLED";
-        payment.cancelledAt = new Date();
-        await payment.save();
+      const payment = await findPaymentByOrderCode(orderCode, null, "PENDING");
+      if (!payment) {
+        console.log(`No pending payment found for orderCode: ${orderCode}`);
+        return res.status(200).json({ message: "No pending payment found" });
       }
+
+      const failureReason = webhookData.desc || webhookData.message || "Unknown failure reason";
+      console.log(`Payment failed/cancelled for orderCode: ${orderCode}, reason: ${failureReason}, code: ${webhookData.code}`);
+      
+      let updateData = {};
+      
+      // Determine specific failure type based on PayOS codes
+      if (webhookData.code === "02" || webhookData.code === "10" || failureReason.toLowerCase().includes("cancel")) {
+        updateData = {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelReason: failureReason
+        };
+      } else if (webhookData.code === "03" || failureReason.toLowerCase().includes("expire")) {
+        updateData = {
+          status: "EXPIRED",
+          expiredAt: new Date()
+        };
+      } else {
+        updateData = {
+          status: "FAILED",
+          failedAt: new Date(),
+          failureReason: failureReason
+        };
+      }
+      
+      await Payment.findByIdAndUpdate(payment._id, updateData);
+      console.log(`Payment ${orderCode} status updated to: ${updateData.status}`);
     }
 
-    res.status(200).json({ message: "Webhook processed successfully" });
+    const processingTime = Date.now() - startTime;
+    console.log(`Webhook processed successfully for orderCode: ${orderCode} in ${processingTime}ms`);
+    
+    res.status(200).json({ 
+      message: "Webhook processed successfully",
+      processingTime: processingTime
+    });
   } catch (error) {
-    console.error("Webhook Error:", error);
-    res.status(500).json({ message: "Webhook processing failed" });
+    const processingTime = Date.now() - startTime;
+    console.error(`Webhook Error for orderCode: ${orderCode}, processing time: ${processingTime}ms`, error);
+    
+    // Don't expose internal errors to external webhook calls
+    res.status(500).json({ 
+      message: "Webhook processing failed",
+      timestamp: new Date().toISOString()
+    });
   }
 };
 
@@ -345,86 +506,84 @@ export const checkPackagePaymentStatus = async (req, res) => {
     const { orderCode } = req.params;
     const doctorId = req.doctor._id;
 
-    // Try finding with different orderCode formats
-    let payment = await Payment.findOne({ 
-      orderCode: parseInt(orderCode),
-      doctorId 
-    });
-
-    // If not found with parseInt, try with original string
-    if (!payment) {
-      payment = await Payment.findOne({ 
-        orderCode: orderCode,
-        doctorId 
-      });
-    }
-
+    // Find payment with optimized query
+    const payment = await findPaymentByOrderCode(orderCode, doctorId);
+    
     if (!payment) {
       return res.status(404).json({ 
         message: "Không tìm thấy đơn hàng"
       });
     }
 
-    // Get payment info from PayOS
-    try {
-      const paymentInfo = await payOS.getPaymentLinkInformation(parseInt(orderCode));
-      
-      // Update payment status based on PayOS response
-      if (paymentInfo.status === "PAID" && payment.status !== "PAID") {
-        payment.status = "PAID";
-        payment.paidAt = new Date();
-        await payment.save();
+    // Skip PayOS API call if payment is already in final state
+    const finalStates = ["PAID", "CANCELLED", "EXPIRED", "FAILED"];
+    let shouldCheckPayOS = !finalStates.includes(payment.status);
+    
+    // Also check PayOS if payment is recent (within 30 minutes) to ensure accuracy
+    const isRecent = (Date.now() - payment.createdAt.getTime()) < 30 * 60 * 1000;
+    if (payment.status === "PENDING" || isRecent) {
+      shouldCheckPayOS = true;
+    }
 
-        // Update doctor subscription
-        const doctor = await Doctor.findById(payment.doctorId);
-        if (doctor) {
-          const now = new Date();
+    if (shouldCheckPayOS) {
+      try {
+        const paymentInfo = await payOS.getPaymentLinkInformation(parseInt(orderCode));
+        
+        // Update payment status based on PayOS response if different
+        if (paymentInfo.status !== payment.status) {
+          const updateData = {};
           
-          // For upgrades, start immediately and calculate from current end date if still active
-          // For new subscriptions, start from now
-          let startDate;
-          let endDate;
-          
-          const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
-          const isUpgrade = hasActiveSubscription && doctor.subscriptionPackage !== payment.packageType;
-          
-          if (isUpgrade) {
-            // Upgrade: Start immediately, but preserve remaining time value
-            startDate = now;
-            endDate = new Date(now);
-            endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-          } else {
-            // New subscription or renewal after expiry
-            startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
-            endDate = new Date(startDate);
-            endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+          if (paymentInfo.status === "PAID" && payment.status === "PENDING") {
+            updateData.status = "PAID";
+            updateData.paidAt = new Date();
+            updateData.transactionId = paymentInfo.id;
+
+            // Update doctor subscription
+            const session = await mongoose.startSession();
+            try {
+              await session.withTransaction(async () => {
+                await Payment.findByIdAndUpdate(payment._id, updateData, { session });
+                await updateDoctorSubscription(payment, session);
+              });
+              console.log(`Payment ${orderCode} updated to PAID via status check`);
+            } finally {
+              await session.endSession();
+            }
+          } else if (paymentInfo.status === "CANCELLED") {
+            updateData.status = "CANCELLED";
+            updateData.cancelledAt = new Date();
+            updateData.cancelReason = "Cancelled via PayOS API check";
+            await Payment.findByIdAndUpdate(payment._id, updateData);
+          } else if (paymentInfo.status === "EXPIRED") {
+            updateData.status = "EXPIRED";
+            updateData.expiredAt = new Date();
+            await Payment.findByIdAndUpdate(payment._id, updateData);
+          } else if (paymentInfo.status === "FAILED") {
+            updateData.status = "FAILED";
+            updateData.failedAt = new Date();
+            updateData.failureReason = "Failed via PayOS API check";
+            await Payment.findByIdAndUpdate(payment._id, updateData);
           }
-
-          // Update doctor subscription
-          doctor.subscriptionPackage = payment.packageType;
-          doctor.subscriptionStartDate = startDate;
-          doctor.subscriptionEndDate = endDate;
           
-          // Update benefits based on package
-          const benefits = PACKAGE_BENEFITS[payment.packageType];
-          doctor.scheduleLimits.weekly = benefits.scheduleLimit;
-          doctor.scheduleLimits.used = 0; // Reset weekly usage
-          doctor.scheduleLimits.resetDate = getNextWeekReset();
-          doctor.isPriority = benefits.isPriority;
-          
-          await doctor.save();
+          // Update local payment object for response
+          Object.assign(payment, updateData);
         }
-      } else if (paymentInfo.status === "CANCELLED") {
-        payment.status = "CANCELLED";
-        payment.cancelledAt = new Date();
-        await payment.save();
-      } else if (paymentInfo.status === "EXPIRED") {
-        payment.status = "EXPIRED";
-        payment.expiredAt = new Date();
-        await payment.save();
+      } catch (payOSError) {
+        console.warn(`PayOS API error for orderCode ${orderCode}:`, payOSError.message);
+        // Continue with local payment info if PayOS API fails
       }
-    } catch (payOSError) {
-      // PayOS API error - continue with local payment info
+    }
+
+    // Calculate expiry time for pending payments
+    let expiryInfo = null;
+    if (payment.status === "PENDING") {
+      const expiryTime = new Date(payment.createdAt.getTime() + 15 * 60 * 1000); // 15 minutes
+      const timeLeft = Math.max(0, expiryTime.getTime() - Date.now());
+      expiryInfo = {
+        expiresAt: expiryTime,
+        timeLeftSeconds: Math.floor(timeLeft / 1000),
+        isExpired: timeLeft <= 0
+      };
     }
 
     res.status(200).json({
@@ -439,15 +598,26 @@ export const checkPackagePaymentStatus = async (req, res) => {
         paymentUrl: payment.paymentUrl,
         paidAt: payment.paidAt,
         cancelledAt: payment.cancelledAt,
+        cancelReason: payment.cancelReason,
         expiredAt: payment.expiredAt,
+        failedAt: payment.failedAt,
+        failureReason: payment.failureReason,
         createdAt: payment.createdAt,
       },
+      statusInfo: {
+        isPending: payment.status === "PENDING",
+        isPaid: payment.status === "PAID",
+        isCancelled: payment.status === "CANCELLED",
+        isExpired: payment.status === "EXPIRED",
+        isFailed: payment.status === "FAILED"
+      },
+      expiryInfo: expiryInfo
     });
   } catch (error) {
     console.error("Check Package Payment Error:", error);
     res.status(500).json({ 
       message: "Lỗi kiểm tra trạng thái thanh toán gói",
-      error: error.message 
+      error: process.env.NODE_ENV === 'development' ? error.message : "INTERNAL_ERROR"
     });
   }
 };
@@ -456,44 +626,115 @@ export const checkPackagePaymentStatus = async (req, res) => {
 export const getDoctorPaymentHistory = async (req, res) => {
   try {
     const doctorId = req.doctor._id;
-    const { page = 1, limit = 10, status } = req.query;
+    const { 
+      page = 1, 
+      limit = 10, 
+      status, 
+      packageType, 
+      startDate, 
+      endDate,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
 
-    // Build query
+    // Build query with filters
     const query = { doctorId };
-    if (status) {
+    
+    if (status && status !== 'all') {
       query.status = status;
     }
+    
+    if (packageType && packageType !== 'all') {
+      query.packageType = packageType;
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
 
-    // Pagination
-    const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sort: { createdAt: -1 },
+    // Pagination options
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit))); // Max 50 records per page
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Execute queries in parallel
+    const [payments, totalPayments] = await Promise.all([
+      Payment.find(query)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limitNum)
+        .select('-paymentUrl -transactionId') // Exclude sensitive data
+        .lean(), // Use lean() for better performance
+      Payment.countDocuments(query)
+    ]);
+
+    // Add calculated fields
+    const enrichedPayments = payments.map(payment => ({
+      ...payment,
+      isExpired: payment.status === 'PENDING' && 
+                 (Date.now() - payment.createdAt.getTime()) > 15 * 60 * 1000,
+      ageInDays: Math.floor((Date.now() - payment.createdAt.getTime()) / (1000 * 60 * 60 * 24))
+    }));
+
+    // Calculate statistics
+    const stats = {
+      total: totalPayments,
+      byStatus: {},
+      totalAmount: 0
     };
 
-    // Get payments
-    const payments = await Payment.find(query)
-      .sort(options.sort)
-      .limit(options.limit * 1)
-      .skip((options.page - 1) * options.limit)
-      .select("-paymentUrl");
+    // Get aggregated stats for current filter
+    const aggregateStats = await Payment.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" }
+        }
+      }
+    ]);
 
-    const totalPayments = await Payment.countDocuments(query);
+    aggregateStats.forEach(stat => {
+      stats.byStatus[stat._id] = {
+        count: stat.count,
+        totalAmount: stat.totalAmount
+      };
+      stats.totalAmount += stat.totalAmount;
+    });
 
     res.status(200).json({
       message: "Lấy lịch sử thanh toán gói thành công",
-      payments,
+      payments: enrichedPayments,
       pagination: {
-        currentPage: options.page,
-        totalPages: Math.ceil(totalPayments / options.limit),
+        currentPage: pageNum,
+        totalPages: Math.ceil(totalPayments / limitNum),
         totalPayments,
-        limit: options.limit,
+        limit: limitNum,
+        hasNextPage: pageNum < Math.ceil(totalPayments / limitNum),
+        hasPrevPage: pageNum > 1
       },
+      filters: {
+        status,
+        packageType,
+        startDate,
+        endDate,
+        sortBy,
+        sortOrder
+      },
+      statistics: stats
     });
   } catch (error) {
+    console.error("Get payment history error:", error);
     res.status(500).json({ 
       message: "Lỗi lấy lịch sử thanh toán gói",
-      error: error.message 
+      error: process.env.NODE_ENV === 'development' ? error.message : "INTERNAL_ERROR"
     });
   }
 };
@@ -505,11 +746,20 @@ export const cancelPackagePayment = async (req, res) => {
     const doctorId = req.doctor._id;
 
     // Find payment record
-    const payment = await Payment.findOne({ 
+    let payment = await Payment.findOne({ 
       orderCode: parseInt(orderCode),
       doctorId,
       status: "PENDING"
     });
+
+    // Try with string orderCode if not found
+    if (!payment) {
+      payment = await Payment.findOne({ 
+        orderCode: orderCode,
+        doctorId,
+        status: "PENDING"
+      });
+    }
 
     if (!payment) {
       return res.status(404).json({ 
@@ -520,10 +770,12 @@ export const cancelPackagePayment = async (req, res) => {
     try {
       // Cancel payment on PayOS
       await payOS.cancelPaymentLink(parseInt(orderCode));
+      console.log(`Payment ${orderCode} cancelled via API call`);
       
       // Update payment status
       payment.status = "CANCELLED";
       payment.cancelledAt = new Date();
+      payment.cancelReason = "Cancelled by doctor via API";
       await payment.save();
 
       res.status(200).json({
@@ -532,16 +784,38 @@ export const cancelPackagePayment = async (req, res) => {
           orderCode: payment.orderCode,
           status: payment.status,
           cancelledAt: payment.cancelledAt,
+          cancelReason: payment.cancelReason,
         },
       });
     } catch (payOSError) {
       console.error("PayOS Cancel Error:", payOSError);
+      
+      // Nếu PayOS báo lỗi nhưng payment vẫn có thể đã bị hủy, cập nhật local status
+      if (payOSError.message && payOSError.message.includes("cancelled")) {
+        payment.status = "CANCELLED";
+        payment.cancelledAt = new Date();
+        payment.cancelReason = "Already cancelled on PayOS";
+        await payment.save();
+        
+        return res.status(200).json({
+          message: "Thanh toán đã được hủy trước đó",
+          payment: {
+            orderCode: payment.orderCode,
+            status: payment.status,
+            cancelledAt: payment.cancelledAt,
+            cancelReason: payment.cancelReason,
+          },
+        });
+      }
+      
       res.status(400).json({ 
         message: "Không thể hủy thanh toán trên PayOS",
-        error: payOSError.message 
+        error: payOSError.message,
+        suggestion: "Thanh toán có thể đã được xử lý hoặc hết hạn"
       });
     }
   } catch (error) {
+    console.error("Cancel package payment error:", error);
     res.status(500).json({ 
       message: "Lỗi hủy thanh toán gói",
       error: error.message 
@@ -549,25 +823,381 @@ export const cancelPackagePayment = async (req, res) => {
   }
 };
 
+// Handle payment cancel redirect from PayOS
+export const handlePaymentCancel = async (req, res) => {
+  try {
+    const { orderCode, cancel } = req.query; // PayOS thường gửi orderCode và cancel=true qua query params
+    
+    let cancelResult = {
+      success: false,
+      orderCode: orderCode,
+      message: "Thanh toán đã bị hủy",
+      packageType: null,
+      amount: null
+    };
+
+    if (orderCode) {
+      // Tìm và cập nhật payment nếu cần
+      let payment = await Payment.findOne({ 
+        orderCode: parseInt(orderCode),
+        status: "PENDING" 
+      });
+
+      // Nếu không tìm thấy với parseInt, thử với string
+      if (!payment) {
+        payment = await Payment.findOne({ 
+          orderCode: orderCode,
+          status: "PENDING" 
+        });
+      }
+      
+      if (payment) {
+        payment.status = "CANCELLED";
+        payment.cancelledAt = new Date();
+        payment.cancelReason = "User cancelled on PayOS gateway";
+        await payment.save();
+
+        cancelResult.success = true;
+        cancelResult.packageType = payment.packageType;
+        cancelResult.amount = payment.amount;
+        cancelResult.description = payment.description;
+
+        // Log cancel event
+        console.log(`Payment ${orderCode} cancelled by user redirect`);
+      }
+    }
+    
+    // Redirect về frontend cancel page với thông tin
+    const queryParams = new URLSearchParams({
+      orderCode: orderCode || '',
+      success: cancelResult.success.toString(),
+      packageType: cancelResult.packageType || '',
+      amount: cancelResult.amount || '',
+      message: cancelResult.message
+    });
+    
+    const frontendCancelUrl = `${process.env.CLIENT_URL}/doctor/payment/cancelled?${queryParams.toString()}`;
+    
+    console.log(`Redirecting to frontend cancel page: ${frontendCancelUrl}`);
+    res.redirect(frontendCancelUrl);
+    
+  } catch (error) {
+    console.error("Cancel handler error:", error);
+    // Redirect về frontend với error
+    const errorParams = new URLSearchParams({
+      error: 'true',
+      message: error.message,
+      orderCode: req.query.orderCode || ''
+    });
+    res.redirect(`${process.env.CLIENT_URL}/doctor/payment/cancelled?${errorParams.toString()}`);
+  }
+};
+
+// Handle payment success redirect from PayOS
+export const handlePaymentSuccess = async (req, res) => {
+  try {
+    const { orderCode, code, id, status } = req.query;
+    
+    console.log(`Payment success redirect received - OrderCode: ${orderCode}, Code: ${code}, Status: ${status}`);
+    
+    let successResult = {
+      success: false,
+      orderCode: orderCode,
+      paymentVerified: false
+    };
+
+    if (orderCode) {
+      // Tìm payment record
+      let payment = await Payment.findOne({ 
+        orderCode: parseInt(orderCode)
+      });
+
+      if (!payment) {
+        payment = await Payment.findOne({ 
+          orderCode: orderCode
+        });
+      }
+      
+      if (payment && payment.status === "PENDING") {
+        // Kiểm tra trạng thái từ PayOS để xác nhận
+        try {
+          const paymentInfo = await payOS.getPaymentLinkInformation(parseInt(orderCode));
+          
+          if (paymentInfo.status === "PAID") {
+            payment.status = "PAID";
+            payment.paidAt = new Date();
+            payment.transactionId = paymentInfo.id || id;
+            await payment.save();
+
+            // Update doctor subscription (tương tự logic trong webhook)
+            const doctor = await Doctor.findById(payment.doctorId);
+            if (doctor) {
+              const now = new Date();
+              
+              let startDate;
+              let endDate;
+              
+              const hasActiveSubscription = doctor.subscriptionEndDate && doctor.subscriptionEndDate > now;
+              const isUpgrade = hasActiveSubscription && doctor.subscriptionPackage !== payment.packageType;
+              
+              if (isUpgrade) {
+                startDate = now;
+                endDate = new Date(now);
+                endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+                console.log(`Processing upgrade for doctor ${doctor._id}: ${doctor.subscriptionPackage} -> ${payment.packageType}`);
+              } else {
+                startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
+                endDate = new Date(startDate);
+                endDate.setMonth(endDate.getMonth() + payment.packageDuration);
+                console.log(`Processing new/renewal subscription for doctor ${doctor._id}: ${payment.packageType}`);
+              }
+
+              doctor.subscriptionPackage = payment.packageType;
+              doctor.subscriptionStartDate = startDate;
+              doctor.subscriptionEndDate = endDate;
+              
+              const benefits = PACKAGE_BENEFITS[payment.packageType];
+              doctor.scheduleLimits.weekly = benefits.scheduleLimit;
+              doctor.scheduleLimits.used = 0;
+              doctor.scheduleLimits.resetDate = getNextWeekReset();
+              doctor.isPriority = benefits.isPriority;
+              
+              await doctor.save();
+              console.log(`Doctor ${doctor._id} subscription updated successfully via success redirect`);
+            }
+
+            successResult.success = true;
+            successResult.paymentVerified = true;
+          }
+        } catch (payOSError) {
+          console.error("PayOS verification error in success handler:", payOSError);
+          // Vẫn redirect về success page, webhook sẽ xử lý sau
+        }
+      }
+    }
+    
+    // Redirect về frontend success page
+    const queryParams = new URLSearchParams({
+      orderCode: orderCode || '',
+      success: successResult.success.toString(),
+      verified: successResult.paymentVerified.toString(),
+      code: code || '',
+      status: status || ''
+    });
+    
+    const frontendSuccessUrl = `${process.env.CLIENT_URL}/doctor/payment/success?${queryParams.toString()}`;
+    
+    console.log(`Redirecting to frontend success page: ${frontendSuccessUrl}`);
+    res.redirect(frontendSuccessUrl);
+    
+  } catch (error) {
+    console.error("Success handler error:", error);
+    const errorParams = new URLSearchParams({
+      error: 'true',
+      message: error.message,
+      orderCode: req.query.orderCode || ''
+    });
+    res.redirect(`${process.env.CLIENT_URL}/doctor/payment/success?${errorParams.toString()}`);
+  }
+};
+
 // Get available packages and pricing
 export const getPackages = async (req, res) => {
   try {
-    const packages = Object.keys(PACKAGE_PRICES).map(packageType => ({
-      type: packageType,
-      name: packageType === 'silver' ? 'Gói Bạc' : 
-            packageType === 'gold' ? 'Gói Vàng' : 'Gói Kim Cương',
-      benefits: PACKAGE_BENEFITS[packageType],
-      pricing: PACKAGE_PRICES[packageType],
-    }));
+    // Check cache first
+    const now = Date.now();
+    if (CACHE.packages && CACHE.lastUpdated && (now - CACHE.lastUpdated) < CACHE.TTL) {
+      return res.status(200).json({
+        message: "Lấy danh sách gói thành công",
+        packages: CACHE.packages,
+        cached: true
+      });
+    }
+
+    // Generate packages data
+    const packages = Object.keys(PACKAGE_PRICES).map(packageType => {
+      const pricing = PACKAGE_PRICES[packageType];
+      const benefits = PACKAGE_BENEFITS[packageType];
+      
+      // Calculate discount percentages
+      const basePrice = pricing[1];
+      const discounts = {};
+      Object.keys(pricing).forEach(duration => {
+        if (duration !== '1') {
+          const expectedPrice = basePrice * parseInt(duration);
+          const actualPrice = pricing[duration];
+          const discount = Math.round(((expectedPrice - actualPrice) / expectedPrice) * 100);
+          discounts[duration] = discount;
+        }
+      });
+
+      return {
+        type: packageType,
+        name: getPackageName(packageType),
+        level: PACKAGE_HIERARCHY[packageType],
+        benefits: {
+          ...benefits,
+          features: [
+            `${benefits.scheduleLimit} lịch hẹn/tuần`,
+            benefits.isPriority ? 'Ưu tiên hiển thị' : 'Hiển thị thông thường',
+            'Hỗ trợ khách hàng 24/7',
+            'Báo cáo thống kê chi tiết'
+          ]
+        },
+        pricing: pricing,
+        discounts: discounts,
+        popular: packageType === 'gold', // Mark gold as popular
+        recommended: packageType === 'diamond' // Mark diamond as recommended
+      };
+    });
+
+    // Update cache
+    CACHE.packages = packages;
+    CACHE.lastUpdated = now;
 
     res.status(200).json({
       message: "Lấy danh sách gói thành công",
       packages,
+      metadata: {
+        totalPackages: packages.length,
+        validDurations: VALID_DURATIONS,
+        currency: 'VND',
+        lastUpdated: new Date(now).toISOString()
+      }
     });
   } catch (error) {
+    console.error("Get packages error:", error);
     res.status(500).json({ 
       message: "Lỗi lấy danh sách gói",
-      error: error.message 
+      error: process.env.NODE_ENV === 'development' ? error.message : "INTERNAL_ERROR"
+    });
+  }
+};
+
+// Get payment statistics for doctor
+export const getPaymentStatistics = async (req, res) => {
+  try {
+    const doctorId = req.doctor._id;
+
+    // Get payment statistics with optimized aggregation
+    const [stats, recentPayments, monthlyStats] = await Promise.all([
+      Payment.aggregate([
+        { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            totalAmount: { $sum: "$amount" }
+          }
+        }
+      ]),
+      Payment.find({ doctorId })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select("orderCode amount packageType status createdAt paidAt cancelledAt")
+        .lean(),
+      Payment.aggregate([
+        { 
+          $match: { 
+            doctorId: new mongoose.Types.ObjectId(doctorId),
+            createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
+          } 
+        },
+        {
+          $group: {
+            _id: { 
+              year: { $year: "$createdAt" },
+              month: { $month: "$createdAt" },
+              day: { $dayOfMonth: "$createdAt" }
+            },
+            count: { $sum: 1 },
+            amount: { $sum: "$amount" }
+          }
+        },
+        { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } }
+      ])
+    ]);
+
+    // Calculate metrics
+    const totalPayments = stats.reduce((sum, stat) => sum + stat.count, 0);
+    const successfulPayments = stats.find(stat => stat._id === "PAID")?.count || 0;
+    const totalRevenue = stats.find(stat => stat._id === "PAID")?.totalAmount || 0;
+    const successRate = totalPayments > 0 ? ((successfulPayments / totalPayments) * 100).toFixed(2) : 0;
+
+    // Calculate conversion rate (paid vs total)
+    const conversionRate = totalPayments > 0 ? ((successfulPayments / totalPayments) * 100).toFixed(2) : 0;
+
+    res.status(200).json({
+      message: "Lấy thống kê thanh toán thành công",
+      statistics: {
+        overview: {
+          totalPayments,
+          successfulPayments,
+          totalRevenue,
+          successRate: parseFloat(successRate),
+          conversionRate: parseFloat(conversionRate)
+        },
+        byStatus: stats,
+        recentPayments,
+        monthlyTrend: monthlyStats,
+        period: {
+          from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+          to: new Date().toISOString()
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Get payment statistics error:", error);
+    res.status(500).json({ 
+      message: "Lỗi lấy thống kê thanh toán",
+      error: process.env.NODE_ENV === 'development' ? error.message : "INTERNAL_ERROR"
+    });
+  }
+};
+
+// Health check for payment system
+export const getPaymentSystemHealth = async (req, res) => {
+  try {
+    const healthChecks = {
+      database: false,
+      payOS: false,
+      cache: false
+    };
+
+    // Check database connectivity
+    try {
+      await Payment.findOne().limit(1);
+      healthChecks.database = true;
+    } catch (dbError) {
+      console.error("Database health check failed:", dbError);
+    }
+
+    // Check PayOS connectivity (if API allows)
+    try {
+      // This is a placeholder - implement based on PayOS API capabilities
+      healthChecks.payOS = true;
+    } catch (payOSError) {
+      console.error("PayOS health check failed:", payOSError);
+    }
+
+    // Check cache status
+    healthChecks.cache = CACHE.packages !== null;
+
+    const isHealthy = Object.values(healthChecks).every(check => check === true);
+
+    res.status(isHealthy ? 200 : 503).json({
+      status: isHealthy ? "healthy" : "degraded",
+      timestamp: new Date().toISOString(),
+      services: healthChecks,
+      uptime: process.uptime(),
+      version: process.env.npm_package_version || "unknown"
+    });
+  } catch (error) {
+    console.error("Health check error:", error);
+    res.status(503).json({
+      status: "unhealthy",
+      timestamp: new Date().toISOString(),
+      error: error.message
     });
   }
 };

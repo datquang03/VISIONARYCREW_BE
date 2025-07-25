@@ -6,27 +6,27 @@ import {
   getDoctorPaymentHistory,
   cancelPackagePayment,
   getPackages,
+  handlePaymentCancel,
+  handlePaymentSuccess,
+  getPaymentStatistics,
+  getPaymentSystemHealth,
 } from "../controllers/payment.controllers.js";
 import { protectDoctorRouter } from "../middlewares/auth.js";
 
 const router = express.Router();
 
-// Get available packages and pricing
+// Public routes (no auth required)
 router.get("/packages", getPackages);
-
-// Create package payment link (doctor only)
-router.post("/package/create", protectDoctorRouter, createPackagePayment);
-
-// PayOS webhook for package payments (no auth required)
 router.post("/package/webhook", handlePackagePaymentWebhook);
+router.get("/package/success", handlePaymentSuccess);
+router.get("/package/cancel", handlePaymentCancel);
+router.get("/health", getPaymentSystemHealth);
 
-// Check package payment status (doctor only)
+// Protected routes (doctor auth required)
+router.post("/package/create", protectDoctorRouter, createPackagePayment);
 router.get("/package/status/:orderCode", protectDoctorRouter, checkPackagePaymentStatus);
-
-// Get doctor's package payment history (doctor only)
 router.get("/package/history", protectDoctorRouter, getDoctorPaymentHistory);
-
-// Cancel package payment (doctor only)
+router.get("/package/statistics", protectDoctorRouter, getPaymentStatistics);
 router.post("/package/cancel/:orderCode", protectDoctorRouter, cancelPackagePayment);
 
 export default router;
