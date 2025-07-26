@@ -1,5 +1,10 @@
 import Schedule from "../models/Schedule/schedule.models.js";
 import Doctor from "../models/User/doctor.models.js";
+import sendEmail from "../utils/sendEmail.js";
+import { sendRegisterEmail, sendCancelEmail, sendRejectEmail } from "../utils/sendEmail.js";
+import Notification from "../models/notification.models.js";
+import { io } from "../server.js";
+import User from '../models/User/user.models.js';
 
 // Create a new schedule slot
 export const createSchedule = async (req, res) => {
@@ -156,33 +161,19 @@ export const createSchedule = async (req, res) => {
 // Get logged-in doctor's schedules
 export const getMySchedules = async (req, res) => {
   try {
-    const doctorId = req.doctor._id; // Get logged-in doctor's ID from auth token
-    const { date, status } = req.query;
+    const doctorId = req.doctor._id;
+    const schedules = await Schedule.find({ doctor: doctorId })
+      .populate({ path: 'patient', select: 'username' });
 
-    let query = { doctor: doctorId };
-
-    // Add date filter if provided
-    if (date) {
-      const startDate = new Date(date);
-      const endDate = new Date(date);
-      endDate.setDate(endDate.getDate() + 1);
-      query.date = { $gte: startDate, $lt: endDate };
-    }
-
-    // Add status filter if provided
-    if (status) {
-      query.status = status;
-    }
-
-    const schedules = await Schedule.find(query)
-      .sort({ date: 1, 'timeSlot.startTime': 1 });
-
-    res.status(200).json(schedules);
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Lỗi lấy lịch hẹn", 
-      error: error.message 
+    res.status(200).json({
+      message: `Có tổng ${schedules.length} lịch hẹn của bạn`,
+      schedules: schedules.map(sch => ({
+        ...sch.toObject(),
+        patientUsername: sch.patient ? sch.patient.username : null,
+      })),
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };
 
@@ -582,6 +573,27 @@ export const registerSchedule = async (req, res) => {
     // Populate doctor details before sending response
     await schedule.populate('doctor', 'username fullName doctorType workplace');
 
+    try {
+      await sendRegisterEmail({ doctor: schedule.doctor, patient: schedule.patient, schedule });
+      await Notification.create({
+        userId: schedule.doctor._id,
+        type: "schedule_register",
+        message: `Bạn có lịch hẹn mới từ ${req.user.username} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}`,
+        data: { scheduleId: schedule._id, patient: req.user._id },
+      });
+      await Notification.create({
+        userId: req.user._id,
+        type: "schedule_register",
+        message: `Bạn đã đặt lịch thành công với bác sĩ ${schedule.doctor.fullName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}`,
+        data: { scheduleId: schedule._id, doctor: schedule.doctor._id },
+      });
+    } catch (e) { console.error("Email error:", e.message); }
+
+    // Emit notification for doctor (register)
+    io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_register" });
+    // Emit notification for user (register)
+    io && io.to(req.user._id.toString()).emit("notification", { type: "schedule_register" });
+
     res.status(200).json({
       message: "Đăng ký lịch hẹn thành công",
       schedule
@@ -628,11 +640,26 @@ export const cancelRegisteredSchedule = async (req, res) => {
     }
 
     // Update the schedule
-    schedule.status = "cancelled";
-    schedule.isAvailable = false;
-    schedule.cancelReason = cancelReason;
+    schedule.status = "available";
+    schedule.isAvailable = true;
+    schedule.patient = null;
+    schedule.cancelReason = undefined;
 
     await schedule.save();
+
+    try {
+      const admins = await User.find({ role: 'admin' });
+      await sendCancelEmail({ doctor: schedule.doctor, patient: req.user, schedule, cancelReason, admins });
+      await Notification.create({
+        userId: schedule.doctor._id,
+        type: "schedule_cancel",
+        message: `Lịch hẹn vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} đã bị hủy bởi bệnh nhân ${req.user.username}`,
+        data: { scheduleId: schedule._id, patient: req.user._id, reason: cancelReason },
+      });
+    } catch (e) { console.error("Email error:", e.message); }
+
+    // Emit notification for doctor (cancel)
+    io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_cancel" });
 
     res.status(200).json({
       message: "Hủy lịch hẹn thành công",
@@ -721,5 +748,57 @@ export const makeScheduleAvailable = async (req, res) => {
       message: "Lỗi kích hoạt lại lịch hẹn", 
       error: error.message 
     });
+  }
+};
+
+export const rejectRegisterSchedule = async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+    const { rejectedReason } = req.body;
+    const doctorId = req.doctor._id;
+
+    if (!rejectedReason) {
+      return res.status(400).json({ message: "Lý do từ chối là bắt buộc" });
+    }
+
+    // Find the schedule and ensure it belongs to the doctor
+    const schedule = await Schedule.findOne({
+      _id: scheduleId,
+      doctor: doctorId,
+      status: "booked"
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ message: "Lịch hẹn không tồn tại hoặc không thuộc về bạn" });
+    }
+
+    // Update the schedule
+    schedule.status = "available";
+    schedule.isAvailable = true;
+    schedule.patient = null;
+    schedule.rejectedReason = rejectedReason;
+
+    await schedule.save();
+
+    try {
+      const admins = await User.find({ role: 'admin' });
+      await sendRejectEmail({ doctor: schedule.doctor, patient: schedule.patient, schedule, rejectedReason, admins });
+      await Notification.create({
+        userId: schedule.patient, // bệnh nhân bị từ chối
+        type: "schedule_reject",
+        message: `Lịch hẹn của bạn với bác sĩ đã bị từ chối vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}`,
+        data: { scheduleId: schedule._id, doctor: req.doctor._id, reason: rejectedReason },
+      });
+    } catch (e) { console.error("Email error:", e.message); }
+
+    // Emit notification for patient (reject)
+    io && io.to(schedule.patient?.toString()).emit("notification", { type: "schedule_reject" });
+
+    res.status(200).json({
+      message: "Từ chối lịch hẹn thành công",
+      schedule
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };

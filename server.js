@@ -9,6 +9,9 @@ import userRoutes from "./routes/user.routes.js";
 import doctorRoutes from "./routes/doctor.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import scheduleRoutes from "./routes/schedule.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import { Server as SocketIOServer } from "socket.io";
+import http from "http";
 
 dotenv.config();
 
@@ -41,20 +44,46 @@ app.use('/api/users', userRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/schedules', scheduleRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Default route (for "/")
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Connect to MongoDB and start the server for local development
+// Tạo HTTP server để dùng với socket.io
+const server = http.createServer(app);
+let io;
+if (!process.env.VERCEL) {
+  io = new SocketIOServer(server, {
+    cors: {
+      origin: [
+        'http://localhost:5173',
+        process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app'
+      ],
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      credentials: true
+    }
+  });
+
+  io.on("connection", (socket) => {
+    // Nhận userId khi client connect để join vào room riêng
+    socket.on("join", (userId) => {
+      if (userId) socket.join(userId);
+    });
+    // Có thể mở rộng thêm các event khác
+  });
+}
+
+// Thay app.listen bằng server.listen nếu không phải Vercel
 const startServer = async () => {
   try {
     await connectDB();
-    app.listen(port, () => {
-      console.log(`🚀 Server is running on http://localhost:${port}`);
-      console.log(`🚀 Deployed at ${process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app'}`);
-    });
+    if (!process.env.VERCEL) {
+      server.listen(port, () => {
+        // Server started successfully
+      });
+    }
   } catch (err) {
     console.error('❌ Failed to start server:', err);
     process.exit(1);
@@ -65,6 +94,9 @@ const startServer = async () => {
 if (!process.env.VERCEL) {
   startServer();
 }
+
+// Export io để controller sử dụng
+export { io };
 
 // Export for Vercel serverless functions
 export default app;

@@ -113,6 +113,7 @@ export const reRegisterDoctor = async (req, res) => {
     const {
       doctorId, fullName, address, doctorType,
       certifications, education, workExperience,
+      description,
       recentJob,
     } = req.body;
 
@@ -178,7 +179,7 @@ export const reRegisterDoctor = async (req, res) => {
     doctor.certifications = parsedCertifications;
     doctor.education = parsedEducation;
     doctor.workExperience = parsedWorkExperience;
-    doctor.description = null;
+    doctor.description = description || null;
     doctor.recentJob = recentJob || null;
     doctor.doctorApplicationStatus = "pending";
     doctor.rejectionMessage = null;
@@ -258,17 +259,53 @@ export const login = async (req, res) => {
 // Get my profile
 export const getMyProfile = async (req, res) => {
   try {
-    const doctor = await Doctor.findById(req.doctor._id).select("-password -resetPasswordCode -verifyToken -tempEmail");
+    const doctor = await Doctor.findById(req.doctor._id).select("-password");
     if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
+
+    // Lấy thông tin subscription nếu có
+    let subscription = null;
+    if (doctor.subscriptionPackage) {
+      const now = new Date();
+      let isExpired = false;
+      if (doctor.subscriptionEndDate && doctor.subscriptionEndDate < now) {
+        isExpired = true;
+      }
+      subscription = {
+        packageType: doctor.subscriptionPackage,
+        startDate: doctor.subscriptionStartDate,
+        endDate: doctor.subscriptionEndDate,
+        isExpired,
+        daysRemaining: doctor.subscriptionEndDate 
+          ? Math.max(0, Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24)))
+          : 0,
+        scheduleLimits: doctor.scheduleLimits,
+        isPriority: doctor.isPriority,
+      };
+    }
 
     res.status(200).json({
       message: "Lấy thông tin bác sĩ thành công",
       doctor: {
-        ...doctor.toObject(),
-        dateOfBirth: doctor.dateOfBirth ? formatDate(doctor.dateOfBirth) : null,
-        createdAt: formatDate(doctor.createdAt),
+        id: doctor._id,
+        username: doctor.username,
+        email: doctor.email,
+        phone: doctor.phone,
+        dateOfBirth: doctor.dateOfBirth,
+        fullName: doctor.fullName,
+        address: doctor.address,
+        doctorType: doctor.doctorType,
+        certifications: doctor.certifications,
+        education: doctor.education,
+        workExperience: doctor.workExperience,
+        description: doctor.description,
+        avatar: doctor.avatar,
+        status: doctor.doctorApplicationStatus,
+        rejectionMessage: doctor.rejectionMessage || null,
+        submittedAt: formatDate(doctor.createdAt),
         updatedAt: formatDate(doctor.updatedAt),
-      },
+        recentJob: doctor.recentJob,
+        subscription,
+      }
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

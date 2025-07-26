@@ -74,15 +74,15 @@ router.get("/pending",protectRouter,admin, getPendingDoctor); // public getPendi
 router.patch("/handle", protectRouter, admin, handleDoctorApplication);
 // ===== DOCTOR AUTHENTICATED ROUTES (any doctor, any status) =====
 router.get("/register", protectRouterForDoctor, getDoctorByRegisterId);
+// ===== ACCEPTED DOCTOR ROUTES =====
+router.get("/profile", protectRouterForDoctor, getMyProfile);
+router.put("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, uploadAny, handleMulterError, updateProfile);
+// ===== DOCTOR AUTHENTICATED ROUTES (any doctor, any status) tiếp =====
 router.get("/:id", protectRouterForDoctor, getDoctorById);
 router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
 
 // ===== PENDING OR REJECTED DOCTOR ROUTES =====
 router.post("/reregister", protectRouterForDoctor, uploadAny, handleMulterError, reRegisterDoctor);
-
-// ===== ACCEPTED DOCTOR ROUTES =====
-router.get("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, getMyProfile);
-router.put("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, uploadAny, handleMulterError, updateProfile);
 
 // ===== DOCTOR SUBSCRIPTION (require doctor, any status) =====
 router.get("/subscription/my", protectDoctorRouter, getMySubscription);

@@ -33,6 +33,41 @@ export const protectRouter = asyncHandler(async (req, res, next) => {
     return res.status(401).json({ message: "Chưa đăng nhập" });
   }
 });
+
+// Protect router for any user type (user, doctor, admin)
+export const protectAnyUser = asyncHandler(async (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    try {
+      token = req.headers.authorization.split(" ")[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      // Thử tìm user thường trước
+      req.user = await User.findById(decoded.id).select("-password");
+      if (req.user) {
+        return next();
+      }
+      
+      // Nếu không phải user thường, thử tìm doctor
+      req.doctor = await Doctor.findById(decoded.id).select("-password");
+      if (req.doctor) {
+        return next();
+      }
+      
+      // Nếu không tìm thấy cả hai, trả lỗi
+      return res.status(401).json({ message: "Token không hợp lệ" });
+    } catch (error) {
+      console.error("Token verification error:", error);
+      return res.status(401).json({ message: "Chưa đăng nhập" });
+    }
+  } else {
+    return res.status(401).json({ message: "Chưa đăng nhập" });
+  }
+});
+
 // Admin middleware (User model)
 export const admin = asyncHandler(async (req, res, next) => {
   if (req.user && req.user.role === "admin") {
@@ -70,9 +105,6 @@ export const protectRouterForDoctor = asyncHandler(async (req, res, next) => {
     return res.status(401).json({ message: "Chưa đăng nhập" });
   }
 });
-
-
-
 
 // Allow only accepted doctors (Doctor model)
 export const allowOnlyAcceptedDoctor = asyncHandler(async (req, res, next) => {

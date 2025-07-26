@@ -12,6 +12,7 @@ import {
   cancelRegisteredSchedule,
   getMyRegisteredSchedules,
   makeScheduleAvailable,
+  rejectRegisterSchedule,
 } from "../controllers/schedule.controllers.js";
 
 const router = express.Router();
@@ -26,6 +27,7 @@ router.get("/my-schedules", protectRouterForDoctor, getMySchedules);
 router.put("/:scheduleId", protectRouterForDoctor, updateSchedule);
 router.delete("/:scheduleId", protectRouterForDoctor, deleteSchedule);
 router.post("/reactivate/:scheduleId", protectRouterForDoctor, makeScheduleAvailable);
+router.post("/reject/:scheduleId", protectRouterForDoctor, rejectRegisterSchedule);
 
 // User routes (requires authentication)
 router.post("/register/:scheduleId", protectRouter, registerSchedule);

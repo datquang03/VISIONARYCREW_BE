@@ -38,7 +38,6 @@ export const sendEmailDoctorApplication = async (doctor, status, rejectionMessag
 
     // Send email
     await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${doctor.email} with status: ${status}`);
   } catch (error) {
     console.error(`Error sending doctor application email (${status}):`, error.message);
     throw new Error(`Gửi email ${status} đăng ký bác sĩ thất bại`);

@@ -14,21 +14,12 @@ const CACHE = {
 const PACKAGE_PRICES = {
   silver: {
     1: 3000,   // 1 month
-    3: 279000,  // 3 months (5% discount)
-    6: 534000,  // 6 months (10% discount)
-    12: 1009000 // 12 months (15% discount)
   },
   gold: {
     1: 199000,   // 1 month
-    3: 567000,   // 3 months (5% discount)
-    6: 1074000,  // 6 months (10% discount)
-    12: 2029000  // 12 months (15% discount)
   },
   diamond: {
     1: 299000,   // 1 month
-    3: 854000,   // 3 months (5% discount)
-    6: 1614000,  // 6 months (10% discount)
-    12: 3050000  // 12 months (15% discount)
   }
 };
 
@@ -269,8 +260,8 @@ export const createPackagePayment = async (req, res) => {
           orderCode: orderCode,
           amount: amount,
           description: shortDescription,
-          returnUrl: `${process.env.API_URL || process.env.BASE_URL}/api/payment/package/success`,
-          cancelUrl: `${process.env.API_URL || process.env.BASE_URL}/api/payment/package/cancel`,
+          returnUrl: `${process.env.API_URL || 'http://localhost:8080'}/api/payments/package/success`,
+          cancelUrl: `${process.env.API_URL || 'http://localhost:8080'}/api/payments/package/cancel`,
         };
 
         // Create payment link with PayOS
@@ -352,13 +343,15 @@ const updateDoctorSubscription = async (payment, session = null) => {
     startDate = now;
     endDate = new Date(now);
     endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-    console.log(`Processing upgrade for doctor ${doctor._id}: ${doctor.subscriptionPackage} -> ${payment.packageType}`);
+    // Upgrade: Start immediately
+    startDate = now;
+    endDate = new Date(now);
+    endDate.setMonth(endDate.getMonth() + payment.packageDuration);
   } else {
     // New subscription or renewal
     startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
     endDate = new Date(startDate);
     endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-    console.log(`Processing ${hasActiveSubscription ? 'renewal' : 'new'} subscription for doctor ${doctor._id}: ${payment.packageType}`);
   }
 
   // Update doctor subscription
@@ -394,7 +387,7 @@ export const handlePackagePaymentWebhook = async (req, res) => {
     }
     global.lastWebhookTime = startTime;
     
-    console.log(`Webhook received for orderCode: ${orderCode}, code: ${webhookData.code}, time: ${new Date().toISOString()}`);
+
     
     if (webhookData.code === "00") {
       // Payment successful
@@ -416,11 +409,8 @@ export const handlePackagePaymentWebhook = async (req, res) => {
       );
 
       if (!updatedPayment) {
-        console.log(`Payment ${orderCode} already processed or not in PENDING status`);
         return res.status(200).json({ message: "Payment already processed" });
       }
-
-      console.log(`Payment ${orderCode} marked as PAID`);
 
       // Update doctor subscription with transaction
       const session = await mongoose.startSession();
@@ -428,7 +418,6 @@ export const handlePackagePaymentWebhook = async (req, res) => {
         await session.withTransaction(async () => {
           await updateDoctorSubscription(updatedPayment, session);
         });
-        console.log(`Doctor subscription updated successfully for payment ${orderCode}`);
       } catch (error) {
         console.error(`Failed to update doctor subscription for payment ${orderCode}:`, error);
         // Payment is already marked as PAID, log error but don't fail webhook
@@ -439,12 +428,10 @@ export const handlePackagePaymentWebhook = async (req, res) => {
       // Payment failed or cancelled
       const payment = await findPaymentByOrderCode(orderCode, null, "PENDING");
       if (!payment) {
-        console.log(`No pending payment found for orderCode: ${orderCode}`);
         return res.status(200).json({ message: "No pending payment found" });
       }
 
       const failureReason = webhookData.desc || webhookData.message || "Unknown failure reason";
-      console.log(`Payment failed/cancelled for orderCode: ${orderCode}, reason: ${failureReason}, code: ${webhookData.code}`);
       
       let updateData = {};
       
@@ -469,11 +456,9 @@ export const handlePackagePaymentWebhook = async (req, res) => {
       }
       
       await Payment.findByIdAndUpdate(payment._id, updateData);
-      console.log(`Payment ${orderCode} status updated to: ${updateData.status}`);
     }
 
     const processingTime = Date.now() - startTime;
-    console.log(`Webhook processed successfully for orderCode: ${orderCode} in ${processingTime}ms`);
     
     res.status(200).json({ 
       message: "Webhook processed successfully",
@@ -545,7 +530,6 @@ export const checkPackagePaymentStatus = async (req, res) => {
                 await Payment.findByIdAndUpdate(payment._id, updateData, { session });
                 await updateDoctorSubscription(payment, session);
               });
-              console.log(`Payment ${orderCode} updated to PAID via status check`);
             } finally {
               await session.endSession();
             }
@@ -770,7 +754,6 @@ export const cancelPackagePayment = async (req, res) => {
     try {
       // Cancel payment on PayOS
       await payOS.cancelPaymentLink(parseInt(orderCode));
-      console.log(`Payment ${orderCode} cancelled via API call`);
       
       // Update payment status
       payment.status = "CANCELLED";
@@ -861,9 +844,6 @@ export const handlePaymentCancel = async (req, res) => {
         cancelResult.packageType = payment.packageType;
         cancelResult.amount = payment.amount;
         cancelResult.description = payment.description;
-
-        // Log cancel event
-        console.log(`Payment ${orderCode} cancelled by user redirect`);
       }
     }
     
@@ -876,9 +856,8 @@ export const handlePaymentCancel = async (req, res) => {
       message: cancelResult.message
     });
     
-    const frontendCancelUrl = `${process.env.CLIENT_URL}/doctor/payment/cancelled?${queryParams.toString()}`;
+    const frontendCancelUrl = `${process.env.CLIENT_URL || 'http://localhost:5173'}/doctor/payment/cancelled?${queryParams.toString()}`;
     
-    console.log(`Redirecting to frontend cancel page: ${frontendCancelUrl}`);
     res.redirect(frontendCancelUrl);
     
   } catch (error) {
@@ -889,7 +868,7 @@ export const handlePaymentCancel = async (req, res) => {
       message: error.message,
       orderCode: req.query.orderCode || ''
     });
-    res.redirect(`${process.env.CLIENT_URL}/doctor/payment/cancelled?${errorParams.toString()}`);
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/doctor/payment/cancelled?${errorParams.toString()}`);
   }
 };
 
@@ -897,8 +876,6 @@ export const handlePaymentCancel = async (req, res) => {
 export const handlePaymentSuccess = async (req, res) => {
   try {
     const { orderCode, code, id, status } = req.query;
-    
-    console.log(`Payment success redirect received - OrderCode: ${orderCode}, Code: ${code}, Status: ${status}`);
     
     let successResult = {
       success: false,
@@ -944,12 +921,10 @@ export const handlePaymentSuccess = async (req, res) => {
                 startDate = now;
                 endDate = new Date(now);
                 endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-                console.log(`Processing upgrade for doctor ${doctor._id}: ${doctor.subscriptionPackage} -> ${payment.packageType}`);
               } else {
                 startDate = hasActiveSubscription ? doctor.subscriptionEndDate : now;
                 endDate = new Date(startDate);
                 endDate.setMonth(endDate.getMonth() + payment.packageDuration);
-                console.log(`Processing new/renewal subscription for doctor ${doctor._id}: ${payment.packageType}`);
               }
 
               doctor.subscriptionPackage = payment.packageType;
@@ -963,7 +938,6 @@ export const handlePaymentSuccess = async (req, res) => {
               doctor.isPriority = benefits.isPriority;
               
               await doctor.save();
-              console.log(`Doctor ${doctor._id} subscription updated successfully via success redirect`);
             }
 
             successResult.success = true;
@@ -985,9 +959,8 @@ export const handlePaymentSuccess = async (req, res) => {
       status: status || ''
     });
     
-    const frontendSuccessUrl = `${process.env.CLIENT_URL}/doctor/payment/success?${queryParams.toString()}`;
+    const frontendSuccessUrl = `${process.env.CLIENT_URL || 'http://localhost:5173'}/doctor/payment/success?${queryParams.toString()}`;
     
-    console.log(`Redirecting to frontend success page: ${frontendSuccessUrl}`);
     res.redirect(frontendSuccessUrl);
     
   } catch (error) {
@@ -997,7 +970,7 @@ export const handlePaymentSuccess = async (req, res) => {
       message: error.message,
       orderCode: req.query.orderCode || ''
     });
-    res.redirect(`${process.env.CLIENT_URL}/doctor/payment/success?${errorParams.toString()}`);
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/doctor/payment/success?${errorParams.toString()}`);
   }
 };
 
