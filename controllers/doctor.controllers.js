@@ -98,7 +98,15 @@ export const registerDoctor = async (req, res) => {
     });
 
     await doctor.save();
-    await sendEmailDoctorApplication(doctor, "pending");
+    
+    try {
+      await sendEmailDoctorApplication(doctor, "pending");
+    } catch (emailError) {
+      console.error('Doctor application email error:', emailError.message);
+      // Không throw error để doctor vẫn có thể đăng ký thành công
+      // Chỉ log lỗi để debug
+    }
+    
     return res.status(200).json({ message: "Đăng ký bác sĩ thành công. Vui lòng chờ xét duyệt." });
 
   } catch (error) {
@@ -186,9 +194,16 @@ export const reRegisterDoctor = async (req, res) => {
     doctor.isVerified = false;
 
     await doctor.save();
-    await sendEmailDoctorApplication(doctor, "pending");
-
-    return res.status(200).json({ message: "Đăng ký lại thành công. Vui lòng chờ xét duyệt." });
+    
+    try {
+      await sendEmailDoctorApplication(doctor, "pending");
+    } catch (emailError) {
+      console.error('Doctor re-registration email error:', emailError.message);
+      // Không throw error để doctor vẫn có thể đăng ký lại thành công
+      // Chỉ log lỗi để debug
+    }
+    
+    return res.status(200).json({ message: "Đăng ký lại bác sĩ thành công. Vui lòng chờ xét duyệt." });
   } catch (error) {
     console.error("Re-register doctor error:", error);
     res.status(500).json({ message: error.message });
@@ -215,7 +230,14 @@ export const handleDoctorApplication = async (req, res) => {
     doctor.rejectionMessage = status === "rejected" ? rejectionMessage : null;
 
     await doctor.save();
-    await sendEmailDoctorApplication(doctor, status, rejectionMessage);
+    
+    try {
+      await sendEmailDoctorApplication(doctor, status, rejectionMessage);
+    } catch (emailError) {
+      console.error('Doctor application status email error:', emailError.message);
+      // Không throw error để admin vẫn có thể xử lý đơn đăng ký thành công
+      // Chỉ log lỗi để debug
+    }
 
     return res.status(200).json({ message: `Đã ${status === "accepted" ? "chấp nhận" : "từ chối"} đơn đăng ký bác sĩ.` });
   } catch (error) {

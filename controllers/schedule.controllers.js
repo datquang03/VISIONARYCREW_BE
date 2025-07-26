@@ -570,8 +570,9 @@ export const registerSchedule = async (req, res) => {
 
     await schedule.save();
 
-    // Populate doctor details before sending response
-    await schedule.populate('doctor', 'username fullName doctorType workplace');
+    // Populate doctor and patient details before sending response
+    await schedule.populate('doctor', 'username fullName doctorType workplace email');
+    await schedule.populate('patient', 'username fullName email');
 
     try {
       await sendRegisterEmail({ doctor: schedule.doctor, patient: schedule.patient, schedule });
@@ -646,6 +647,9 @@ export const cancelRegisteredSchedule = async (req, res) => {
     schedule.cancelReason = undefined;
 
     await schedule.save();
+
+    // Populate doctor details before sending email
+    await schedule.populate('doctor', 'username fullName doctorType workplace email');
 
     try {
       const admins = await User.find({ role: 'admin' });
@@ -779,6 +783,10 @@ export const rejectRegisterSchedule = async (req, res) => {
     schedule.rejectedReason = rejectedReason;
 
     await schedule.save();
+
+    // Populate doctor and patient details before sending email
+    await schedule.populate('doctor', 'username fullName doctorType workplace email');
+    await schedule.populate('patient', 'username fullName email');
 
     try {
       const admins = await User.find({ role: 'admin' });

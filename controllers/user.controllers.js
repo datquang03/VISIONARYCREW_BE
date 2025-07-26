@@ -48,7 +48,14 @@ export const register = async (req, res) => {
 
     // Save user and send verification email
     await user.save();
-    await verifyEmail(user);
+    
+    try {
+      await verifyEmail(user);
+    } catch (emailError) {
+      console.error('Email verification error:', emailError.message);
+      // Không throw error để user vẫn có thể đăng ký thành công
+      // Chỉ log lỗi để debug
+    }
 
     res
       .status(200)

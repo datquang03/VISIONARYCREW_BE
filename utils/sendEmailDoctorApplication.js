@@ -6,6 +6,11 @@ dotenv.config();
 // Send email for doctor application status
 export const sendEmailDoctorApplication = async (doctor, status, rejectionMessage = null) => {
   try {
+    // Kiểm tra doctor object và các thuộc tính cần thiết
+    if (!doctor?.email || !doctor?.fullName) {
+      throw new Error('Doctor email or fullName is missing');
+    }
+
     // Create transporter using Gmail SMTP
     const transporter = nodemailer.createTransport({
       service: "Gmail",
