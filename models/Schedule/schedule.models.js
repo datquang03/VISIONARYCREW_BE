@@ -52,7 +52,7 @@ const scheduleSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["available", "booked", "completed", "cancelled"],
+      enum: ["available", "pending", "booked", "completed", "cancelled", "rejected"],
       default: "available",
     },
     appointmentType: {
@@ -65,6 +65,11 @@ const scheduleSchema = new mongoose.Schema(
       trim: true,
     },
     cancelReason: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    rejectedReason: {
       type: String,
       trim: true,
       default: null,

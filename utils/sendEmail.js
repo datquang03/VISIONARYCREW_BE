@@ -74,22 +74,22 @@ export const sendCancelEmail = async ({ doctor, patient, schedule, cancelReason,
 export const sendRejectEmail = async ({ doctor, patient, schedule, rejectedReason, admins }) => {
   if (patient?.email) {
     const subject = 'Visionary Crew - Lịch hẹn bị từ chối';
-    const patientName = patient?.username || patient?.fullName || 'Bạn';
-    const doctorName = doctor?.fullName || 'Bác sĩ';
+    const patientName = patient?.username || 'Bạn';
+    const doctorName = doctor?.username || 'Bác sĩ';
     const text = `Xin chào ${patientName},\n\nLịch hẹn của bạn với bác sĩ ${doctorName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} đã bị từ chối.\nLý do: ${rejectedReason}`;
     await sendEmail(patient.email, subject, text);
   }
-  if (doctor?.email && doctor?.fullName) {
+  if (doctor?.email && doctor?.username) {
     const subject = 'Visionary Crew - Đã từ chối lịch hẹn';
-    const text = `Xin chào Dr. ${doctor.fullName},\n\nBạn đã từ chối lịch hẹn với bệnh nhân vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.\nLý do: ${rejectedReason}`;
+    const text = `Xin chào Dr. ${doctor.username},\n\nBạn đã từ chối lịch hẹn với bệnh nhân vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.\nLý do: ${rejectedReason}`;
     await sendEmail(doctor.email, subject, text);
   }
   if (admins && Array.isArray(admins)) {
     for (const admin of admins) {
       if (admin?.email) {
         const subject = 'Visionary Crew - Lịch hẹn bị từ chối';
-        const patientName = patient?.username || patient?.fullName || 'Bệnh nhân';
-        const doctorName = doctor?.fullName || 'Bác sĩ';
+        const patientName = patient?.username || 'Bệnh nhân';
+        const doctorName = doctor?.username || 'Bác sĩ';
         const text = `Admin thân mến,\n\nBác sĩ ${doctorName} đã từ chối lịch hẹn với bệnh nhân ${patientName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.\nLý do: ${rejectedReason}`;
         await sendEmail(admin.email, subject, text);
       }

@@ -4,6 +4,7 @@ import Payment from "../models/payment.models.js";
 import { verifyEmail } from "../utils/sendEmail.js";
 import { generateToken } from "../middlewares/auth.js";
 import mongoose from "mongoose";
+import { uploadImage } from "../config/cloudinary.js";
 
 // Register a new user
 export const register = async (req, res) => {
@@ -237,12 +238,29 @@ export const updateUserProfile = async (req, res) => {
       return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
 
+    // Handle avatar upload if provided
+    let avatarUrl = user.avatar; // Keep existing avatar by default
+    if (req.files && req.files.length > 0) {
+      try {
+        const avatarFile = req.files.find(file => file.fieldname === 'avatar');
+        if (avatarFile) {
+          // Upload new avatar to Cloudinary
+          avatarUrl = await uploadImage(avatarFile.buffer, 'user-avatars');
+        }
+      } catch (uploadError) {
+        return res.status(400).json({ 
+          message: `Lỗi tải ảnh lên: ${uploadError.message}` 
+        });
+      }
+    }
+
     // Update user details
     user.username = username;
     user.email = email;
     user.phone = phone;
     user.dateOfBirth = dateOfBirth;
     user.description = description;
+    user.avatar = avatarUrl;
 
     // Save updated user
     await user.save();
