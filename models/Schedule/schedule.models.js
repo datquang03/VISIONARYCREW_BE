@@ -52,7 +52,7 @@ const scheduleSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["available", "pending", "booked", "completed", "cancelled", "rejected"],
+      enum: ["available", "pending", "booked", "accepted", "completed", "cancelled", "rejected"],
       default: "available",
     },
     appointmentType: {

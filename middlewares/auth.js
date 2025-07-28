@@ -26,7 +26,6 @@ export const protectRouter = asyncHandler(async (req, res, next) => {
       }
       next();
     } catch (error) {
-      console.error("Token verification error:", error);
       return res.status(401).json({ message: "Chưa đăng nhập" });
     }
   } else {
@@ -93,12 +92,16 @@ export const protectRouterForDoctor = asyncHandler(async (req, res, next) => {
           .status(401)
           .json({ message: "Không tìm thấy bác sĩ với token này" });
       }
+      // Check if doctor has role field, if not, set it to "doctor"
+      if (!req.doctor.role) {
+        req.doctor.role = "doctor";
+        await req.doctor.save();
+      }
       if (req.doctor.role !== "doctor") {
         return res.status(403).json({ message: "Chỉ dành cho bác sĩ" });
       }
       next();
     } catch (error) {
-      console.error("Token verification error:", error);
       return res.status(401).json({ message: "Chưa đăng nhập" });
     }
   } else {

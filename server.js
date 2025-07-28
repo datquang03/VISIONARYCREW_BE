@@ -10,6 +10,8 @@ import doctorRoutes from "./routes/doctor.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import scheduleRoutes from "./routes/schedule.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
+import aiGuideRoutes from "./routes/aiGuide.routes.js";
+
 import { Server as SocketIOServer } from "socket.io";
 import http from "http";
 
@@ -45,6 +47,8 @@ app.use('/api/doctors', doctorRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/ai', aiGuideRoutes);
+
 
 // Default route (for "/")
 app.get('/', (req, res) => {
@@ -66,12 +70,27 @@ if (!process.env.VERCEL) {
     }
   });
 
+  // Lưu io vào global để controller có thể sử dụng
+  global.io = io;
+
   io.on("connection", (socket) => {
+
+    
     // Nhận userId khi client connect để join vào room riêng
     socket.on("join", (userId) => {
-      if (userId) socket.join(userId);
+      if (userId) {
+        socket.join(userId);
+
+      }
     });
-    // Có thể mở rộng thêm các event khác
+
+
+
+    socket.on("disconnect", () => {
+  
+    });
+
+
   });
 }
 
@@ -100,3 +119,4 @@ export { io };
 
 // Export for Vercel serverless functions
 export default app;
+

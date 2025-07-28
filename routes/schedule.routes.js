@@ -18,6 +18,14 @@ import {
   getPendingSchedules,
 } from "../controllers/schedule.controllers.js";
 
+// Debug middleware để kiểm tra request
+const debugRequest = (req, res, next) => {
+  console.log('🔍 Request to:', req.method, req.path);
+  console.log('🔍 Headers:', req.headers);
+  console.log('🔍 Body:', req.body);
+  next();
+};
+
 const router = express.Router();
 // Public routes (no authentication required)
 router.get("/all", getAllSchedules);
@@ -35,10 +43,10 @@ router.post("/reject/:scheduleId", protectRouterForDoctor, rejectRegisterSchedul
 router.post("/accept/:scheduleId", protectRouterForDoctor, acceptRegisterSchedule);
 
 // User routes (requires authentication)
-router.post("/register/:scheduleId", protectRouter, registerSchedule);
-router.post("/cancel/:scheduleId", protectRouter, cancelRegisteredSchedule);
-router.post("/cancel-pending/:scheduleId", protectRouter, cancelPendingSchedule);
-router.get("/my-registered", protectRouter, getMyRegisteredSchedules);
+router.post("/register/:scheduleId", debugRequest, protectRouter, registerSchedule);
+router.post("/cancel/:scheduleId", debugRequest, protectRouter, cancelRegisteredSchedule);
+router.post("/cancel-pending/:scheduleId", debugRequest, protectRouter, cancelPendingSchedule);
+router.get("/my-registered", debugRequest, protectRouter, getMyRegisteredSchedules);
 
 
 

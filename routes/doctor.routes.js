@@ -13,7 +13,7 @@ import {
   checkScheduleAvailability,
   incrementScheduleUsage,
   getAllDoctorsWithPriority,
-  deleteDoctorByRegisterId,
+  // deleteDoctorByRegisterId,
   updateProfile,
 } from "../controllers/doctor.controllers.js";
 import { 
@@ -79,7 +79,7 @@ router.get("/profile", protectRouterForDoctor, getMyProfile);
 router.put("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, uploadAny, handleMulterError, updateProfile);
 // ===== DOCTOR AUTHENTICATED ROUTES (any doctor, any status) tiếp =====
 router.get("/:id", protectRouterForDoctor, getDoctorById);
-router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
+// router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
 
 // ===== PENDING OR REJECTED DOCTOR ROUTES =====
 router.post("/reregister", protectRouterForDoctor, uploadAny, handleMulterError, reRegisterDoctor);

@@ -4,7 +4,7 @@ import Doctor from "../models/User/doctor.models.js";
 
 const updateDoctorSubscriptions = async () => {
   try {
-    console.log("Starting doctor subscription migration...");
+    
     
     // Connect to database if not connected
     if (mongoose.connection.readyState === 0) {
@@ -41,14 +41,11 @@ const updateDoctorSubscriptions = async () => {
       }
     );
 
-    console.log(`Migration completed. Updated ${result.modifiedCount} doctors.`);
+    
     
     // List all doctors with their new subscription info
     const doctors = await Doctor.find({}, 'username subscriptionPackage scheduleLimits isPriority balance');
-    console.log("Doctors after migration:");
-    doctors.forEach(doctor => {
-      console.log(`- ${doctor.username}: ${doctor.subscriptionPackage}, Limit: ${doctor.scheduleLimits.weekly}, Priority: ${doctor.isPriority}, Balance: ${doctor.balance}`);
-    });
+    
 
   } catch (error) {
     console.error("Migration error:", error);

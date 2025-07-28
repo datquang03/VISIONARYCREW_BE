@@ -6,11 +6,14 @@ import Notification from "../models/notification.models.js";
 import { io } from "../server.js";
 import User from '../models/User/user.models.js';
 
+
 // Create a new schedule slot
 export const createSchedule = async (req, res) => {
   try {
     const { date, timeSlot, appointmentType, notes, meetingLink } = req.body;
     const doctorId = req.doctor._id; // Get doctor ID from authenticated doctor
+
+
 
     // Validate time slot format and duration
     if (!timeSlot || !timeSlot.startTime || !timeSlot.endTime) {
@@ -19,9 +22,20 @@ export const createSchedule = async (req, res) => {
       });
     }
 
+    // Validate time format (HH:mm)
+    const timeFormatRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    const startTime = timeSlot.startTime?.trim();
+    const endTime = timeSlot.endTime?.trim();
+
+    if (!timeFormatRegex.test(startTime) || !timeFormatRegex.test(endTime)) {
+      return res.status(400).json({
+        message: "Định dạng thời gian không đúng. Vui lòng sử dụng định dạng HH:mm (ví dụ: 09:00, 14:30)"
+      });
+    }
+
     // Convert time strings to Date objects for comparison
-    const [startHour, startMinute] = timeSlot.startTime.split(':').map(Number);
-    const [endHour, endMinute] = timeSlot.endTime.split(':').map(Number);
+    const [startHour, startMinute] = startTime.split(':').map(Number);
+    const [endHour, endMinute] = endTime.split(':').map(Number);
 
     // Calculate duration in minutes
     const durationInMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
@@ -40,9 +54,21 @@ export const createSchedule = async (req, res) => {
       });
     }
 
+    // Check if the schedule is in the past
+    const scheduleDate = new Date(date);
+    const now = new Date();
+    const scheduleDateTime = new Date(scheduleDate);
+    scheduleDateTime.setHours(endHour, endMinute, 0, 0);
+    
+    if (scheduleDateTime <= now) {
+      return res.status(400).json({
+        message: "Không thể tạo lịch hẹn cho thời gian đã qua. Vui lòng chọn thời gian trong tương lai."
+      });
+    }
+
     // Check for overlapping schedules
-    const [newStartHour, newStartMin] = timeSlot.startTime.split(':').map(Number);
-    const [newEndHour, newEndMin] = timeSlot.endTime.split(':').map(Number);
+    const [newStartHour, newStartMin] = startTime.split(':').map(Number);
+    const [newEndHour, newEndMin] = endTime.split(':').map(Number);
     const newStartMinutes = newStartHour * 60 + newStartMin;
     const newEndMinutes = newEndHour * 60 + newEndMin;
 
@@ -138,7 +164,10 @@ export const createSchedule = async (req, res) => {
     const schedule = new Schedule({
       doctor: doctorId,
       date,
-      timeSlot,
+      timeSlot: {
+        startTime,
+        endTime
+      },
       appointmentType,
       notes,
       meetingLink
@@ -634,7 +663,7 @@ export const cancelRegisteredSchedule = async (req, res) => {
     const schedule = await Schedule.findOne({
       _id: scheduleId,
       patient: userId,
-      status: "booked"
+      status: { $in: ["booked", "accepted", "pending"] }
     });
 
     if (!schedule) {
@@ -940,7 +969,7 @@ export const acceptRegisterSchedule = async (req, res) => {
     }
 
     // Update the schedule
-    schedule.status = "booked";
+    schedule.status = "accepted";
     schedule.isAvailable = false;
 
     await schedule.save();
@@ -970,6 +999,8 @@ export const acceptRegisterSchedule = async (req, res) => {
         data: { scheduleId: schedule._id, doctor: schedule.doctor._id },
       });
     } catch (e) { console.error("Email error:", e.message); }
+
+
 
     // Emit notification for doctor (accept)
     io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_accept" });

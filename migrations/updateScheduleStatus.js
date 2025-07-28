@@ -7,7 +7,7 @@ const updateScheduleStatus = async () => {
   try {
     // Connect to MongoDB
     await mongoose.connect(process.env.MONGODB_URI);
-    console.log('Connected to MongoDB');
+
 
     // Get the Schedule collection
     const Schedule = mongoose.model('Schedule', new mongoose.Schema({
@@ -34,7 +34,7 @@ const updateScheduleStatus = async () => {
       }
     );
 
-    console.log(`Updated ${result.modifiedCount} schedules from "booked" to "pending"`);
+    
 
     // Update schedules that have status "booked" but no patient to "available"
     const result2 = await Schedule.updateMany(
@@ -54,14 +54,14 @@ const updateScheduleStatus = async () => {
       }
     );
 
-    console.log(`Updated ${result2.modifiedCount} schedules from "booked" to "available"`);
+    
 
-    console.log('Migration completed successfully');
+    
   } catch (error) {
     console.error('Migration failed:', error);
   } finally {
     await mongoose.disconnect();
-    console.log('Disconnected from MongoDB');
+    
   }
 };
 

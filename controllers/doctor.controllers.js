@@ -281,53 +281,77 @@ export const login = async (req, res) => {
 // Get my profile
 export const getMyProfile = async (req, res) => {
   try {
+    if (!req.doctor || !req.doctor._id) {
+      return res.status(401).json({ message: "Không tìm thấy thông tin bác sĩ" });
+    }
+    
     const doctor = await Doctor.findById(req.doctor._id).select("-password");
     if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ." });
 
     // Lấy thông tin subscription nếu có
     let subscription = null;
-    if (doctor.subscriptionPackage) {
-      const now = new Date();
-      let isExpired = false;
-      if (doctor.subscriptionEndDate && doctor.subscriptionEndDate < now) {
-        isExpired = true;
+    try {
+      if (doctor.subscriptionPackage) {
+        const now = new Date();
+        let isExpired = false;
+        if (doctor.subscriptionEndDate && doctor.subscriptionEndDate < now) {
+          isExpired = true;
+        }
+        subscription = {
+          packageType: doctor.subscriptionPackage,
+          startDate: doctor.subscriptionStartDate,
+          endDate: doctor.subscriptionEndDate,
+          isExpired,
+          daysRemaining: doctor.subscriptionEndDate 
+            ? Math.max(0, Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24)))
+            : 0,
+          scheduleLimits: doctor.scheduleLimits,
+          isPriority: doctor.isPriority,
+        };
       }
-      subscription = {
-        packageType: doctor.subscriptionPackage,
-        startDate: doctor.subscriptionStartDate,
-        endDate: doctor.subscriptionEndDate,
-        isExpired,
-        daysRemaining: doctor.subscriptionEndDate 
-          ? Math.max(0, Math.ceil((doctor.subscriptionEndDate - now) / (1000 * 60 * 60 * 24)))
-          : 0,
-        scheduleLimits: doctor.scheduleLimits,
-        isPriority: doctor.isPriority,
-      };
+    } catch (error) {
+      console.error('Error processing subscription:', error);
+      subscription = null;
+    }
+
+    const responseData = {
+      id: doctor._id || doctor.id,
+      username: doctor.username || '',
+      email: doctor.email || '',
+      phone: doctor.phone || '',
+      dateOfBirth: doctor.dateOfBirth || null,
+      fullName: doctor.fullName || '',
+      address: doctor.address || '',
+      doctorType: doctor.doctorType || '',
+      certifications: Array.isArray(doctor.certifications) ? doctor.certifications : [],
+      education: Array.isArray(doctor.education) ? doctor.education : [],
+      workExperience: Array.isArray(doctor.workExperience) ? doctor.workExperience : [],
+      description: doctor.description || '',
+      avatar: doctor.avatar || '',
+      status: doctor.doctorApplicationStatus || 'pending',
+      rejectionMessage: doctor.rejectionMessage || null,
+      recentJob: doctor.recentJob || '',
+      subscription,
+    };
+
+    // Safely format dates
+    try {
+      responseData.submittedAt = doctor.createdAt ? formatDate(doctor.createdAt) : null;
+    } catch (error) {
+      console.error('Error formatting createdAt:', error);
+      responseData.submittedAt = null;
+    }
+
+    try {
+      responseData.updatedAt = doctor.updatedAt ? formatDate(doctor.updatedAt) : null;
+    } catch (error) {
+      console.error('Error formatting updatedAt:', error);
+      responseData.updatedAt = null;
     }
 
     res.status(200).json({
       message: "Lấy thông tin bác sĩ thành công",
-      doctor: {
-        id: doctor._id,
-        username: doctor.username,
-        email: doctor.email,
-        phone: doctor.phone,
-        dateOfBirth: doctor.dateOfBirth,
-        fullName: doctor.fullName,
-        address: doctor.address,
-        doctorType: doctor.doctorType,
-        certifications: doctor.certifications,
-        education: doctor.education,
-        workExperience: doctor.workExperience,
-        description: doctor.description,
-        avatar: doctor.avatar,
-        status: doctor.doctorApplicationStatus,
-        rejectionMessage: doctor.rejectionMessage || null,
-        submittedAt: formatDate(doctor.createdAt),
-        updatedAt: formatDate(doctor.updatedAt),
-        recentJob: doctor.recentJob,
-        subscription,
-      }
+      doctor: responseData
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -362,43 +386,102 @@ export const updateProfile = async (req, res) => {
       }
     }
 
-    // Parse certifications
-    let parsedCertifications = [];
-    try {
-      parsedCertifications = certifications ? JSON.parse(certifications) : [];
-    } catch (e) {
-      console.error("Certification parse error", e);
+    // Handle certifications - preserve existing ones and add new ones
+    let existingCertifications = doctor.certifications || [];
+    
+    // If new certification is being uploaded
+    if (req.files?.length > 0) {
+      const certFiles = req.files?.filter((f) => f.fieldname === "certification") || [];
+      if (certFiles.length > 0) {
+        try {
+          const urls = await uploadMultipleImages(certFiles.map(f => f.buffer), "doctor_certifications");
+          const newCertifications = certFiles.map((file, idx) => {
+            // Get description for this specific certification
+            let certDescription = `Chứng chỉ ${idx + 1}`;
+            if (req.body.description && typeof req.body.description === 'string') {
+              certDescription = req.body.description;
+            } else if (req.body[`description_${idx}`] && typeof req.body[`description_${idx}`] === 'string') {
+              certDescription = req.body[`description_${idx}`];
+            }
+            
+            return {
+              description: certDescription,
+              url: urls[idx],
+              uploadedAt: new Date(),
+            };
+          });
+          existingCertifications = [...existingCertifications, ...newCertifications];
+        } catch (uploadError) {
+          return res.status(500).json({ message: "Lỗi khi tải lên chứng chỉ: " + uploadError.message });
+        }
+      }
     }
 
-    const certFiles = req.files?.filter((f) => f.fieldname === "certificationImages") || [];
-    if (certFiles.length > 0) {
-      const urls = await uploadMultipleImages(certFiles.map(f => f.buffer), "doctor_certifications");
-      parsedCertifications = parsedCertifications.map((cert, idx) => ({
-        ...cert,
-        url: urls[idx] || cert.url,
-        uploadedAt: cert.uploadedAt || new Date(),
-      }));
+    // If certifications are being updated via JSON
+    if (certifications) {
+      try {
+        let parsedCertifications;
+        if (typeof certifications === 'string') {
+          parsedCertifications = JSON.parse(certifications);
+        } else if (Array.isArray(certifications)) {
+          parsedCertifications = certifications;
+        }
+        
+        if (Array.isArray(parsedCertifications)) {
+          existingCertifications = parsedCertifications;
+        }
+      } catch (e) {
+        console.error("Certification parse error", e);
+      }
     }
 
     // Parse education and work experience
     let parsedEducation = [];
     let parsedWorkExperience = [];
-    try { parsedEducation = education ? JSON.parse(education) : []; } catch (e) {}
-    try { parsedWorkExperience = workExperience ? JSON.parse(workExperience) : []; } catch (e) {}
+    try { 
+      if (education) {
+        if (typeof education === 'string') {
+          parsedEducation = JSON.parse(education);
+        } else if (Array.isArray(education)) {
+          parsedEducation = education;
+        }
+      }
+    } catch (e) {
+      parsedEducation = [];
+    }
+    try { 
+      if (workExperience) {
+        if (typeof workExperience === 'string') {
+          parsedWorkExperience = JSON.parse(workExperience);
+        } else if (Array.isArray(workExperience)) {
+          parsedWorkExperience = workExperience;
+        }
+      }
+    } catch (e) {
+      parsedWorkExperience = [];
+    }
 
-    // Update fields
-    doctor.fullName = fullName || doctor.fullName;
-    doctor.address = address || doctor.address;
-    doctor.phone = phone || doctor.phone;
-    doctor.dateOfBirth = dateOfBirth || doctor.dateOfBirth;
-    doctor.doctorType = doctorType || doctor.doctorType;
-    doctor.description = description || doctor.description;
-    doctor.certifications = parsedCertifications;
-    doctor.education = parsedEducation;
-    doctor.workExperience = parsedWorkExperience;
-    doctor.recentJob = recentJob || doctor.recentJob;
+    // Update fields - only if they are provided and not arrays
+    if (fullName && typeof fullName === 'string') doctor.fullName = fullName;
+    if (address && typeof address === 'string') doctor.address = address;
+    if (phone && typeof phone === 'string') doctor.phone = phone;
+    if (dateOfBirth) doctor.dateOfBirth = dateOfBirth;
+    if (doctorType && typeof doctorType === 'string') doctor.doctorType = doctorType;
+    if (description && typeof description === 'string' && !Array.isArray(description)) {
+      doctor.description = description;
+    }
+    if (recentJob && typeof recentJob === 'string') doctor.recentJob = recentJob;
+    
+    // Update arrays only if they are provided
+    if (Array.isArray(parsedEducation)) doctor.education = parsedEducation;
+    if (Array.isArray(parsedWorkExperience)) doctor.workExperience = parsedWorkExperience;
+    doctor.certifications = existingCertifications;
 
-    await doctor.save();
+    try {
+      await doctor.save();
+    } catch (saveError) {
+      return res.status(500).json({ message: "Lỗi khi lưu thông tin: " + saveError.message });
+    }
 
     res.status(200).json({
       message: "Cập nhật thông tin cá nhân thành công",
@@ -467,19 +550,19 @@ export const getDoctorByRegisterId = async (req, res) => {
   }
 };
 
-// delete doctor by register ID
-export const deleteDoctorByRegisterId = async (req, res) => {
-  try {
-    const { doctorRegisterId } = req.params;
-    const doctor = await Doctor.findOneAndDelete({ doctorRegisterId });
+// delete doctor by register ID - DISABLED
+// export const deleteDoctorByRegisterId = async (req, res) => {
+//   try {
+//     const { doctorRegisterId } = req.params;
+//     const doctor = await Doctor.findOneAndDelete({ doctorRegisterId });
 
-    if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ với ID đăng ký này." });
+//     if (!doctor) return res.status(404).json({ message: "Không tìm thấy bác sĩ với ID đăng ký này." });
 
-    res.status(200).json({ message: "Đã xóa bác sĩ thành công." });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+//     res.status(200).json({ message: "Đã xóa bác sĩ thành công." });
+//   } catch (error) {
+//     res.status(500).json({ message: error.message });
+//   }
+// };
 
 
 // Get pending
