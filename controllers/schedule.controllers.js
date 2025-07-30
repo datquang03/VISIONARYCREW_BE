@@ -13,6 +13,37 @@ export const createSchedule = async (req, res) => {
     const { date, timeSlot, appointmentType, notes, meetingLink } = req.body;
     const doctorId = req.doctor._id; // Get doctor ID from authenticated doctor
 
+    // Check doctor's schedule limits
+    const doctor = await Doctor.findById(doctorId)
+      .select('subscriptionPackage scheduleLimits')
+      .lean();
+
+    if (!doctor) {
+      return res.status(404).json({ message: "Bác sĩ không tồn tại" });
+    }
+
+    // Count existing schedules for this week
+    const weekStart = new Date();
+    weekStart.setHours(0, 0, 0, 0);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Start of week (Monday)
+    
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Sunday)
+
+    const existingSchedulesCount = await Schedule.countDocuments({
+      doctor: doctorId,
+      date: { $gte: weekStart, $lte: weekEnd }
+    });
+
+    // Check against package limits
+    if (existingSchedulesCount >= doctor.scheduleLimits.weekly) {
+      return res.status(403).json({ 
+        message: `Bạn đã đạt giới hạn lịch hẹn trong tuần (${doctor.scheduleLimits.weekly} lịch/tuần). Vui lòng nâng cấp gói để tạo thêm lịch hẹn.`,
+        currentCount: existingSchedulesCount,
+        weeklyLimit: doctor.scheduleLimits.weekly
+      });
+    }
+
 
 
     // Validate time slot format and duration
