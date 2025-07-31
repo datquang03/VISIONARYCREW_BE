@@ -6,6 +6,21 @@ import Notification from "../models/notification.models.js";
 import { io } from "../server.js";
 import User from '../models/User/user.models.js';
 
+// Utility function to check and reset weekly schedule limits
+const checkAndResetWeeklyLimits = async (doctor) => {
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Start of week (Monday)
+
+  // Reset weekly usage if it's a new week or no reset date is set
+  if (!doctor.scheduleLimits.resetDate || doctor.scheduleLimits.resetDate < weekStart) {
+    doctor.scheduleLimits.used = 0;
+    doctor.scheduleLimits.resetDate = weekStart;
+    await doctor.save();
+  }
+  
+  return doctor;
+};
 
 // Create a new schedule slot
 export const createSchedule = async (req, res) => {
@@ -15,31 +30,40 @@ export const createSchedule = async (req, res) => {
 
     // Check doctor's schedule limits
     const doctor = await Doctor.findById(doctorId)
-      .select('subscriptionPackage scheduleLimits')
-      .lean();
+      .select('subscriptionPackage scheduleLimits');
 
     if (!doctor) {
       return res.status(404).json({ message: "Bác sĩ không tồn tại" });
     }
 
-    // Count existing schedules for this week
+    // Check and reset weekly limits if needed
+    await checkAndResetWeeklyLimits(doctor);
+
+    // Check if the schedule date is within the current week
+    const scheduleDate = new Date(date);
     const weekStart = new Date();
     weekStart.setHours(0, 0, 0, 0);
     weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Start of week (Monday)
     
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Sunday)
+    weekEnd.setHours(23, 59, 59, 999);
 
-    const existingSchedulesCount = await Schedule.countDocuments({
-      doctor: doctorId,
-      date: { $gte: weekStart, $lte: weekEnd }
-    });
+    if (scheduleDate < weekStart || scheduleDate > weekEnd) {
+      return res.status(400).json({
+        message: "Bạn chỉ có thể tạo lịch hẹn trong tuần hiện tại. Vui lòng chọn ngày từ thứ Hai đến Chủ nhật của tuần này.",
+        currentWeek: {
+          start: weekStart.toISOString().split('T')[0],
+          end: weekEnd.toISOString().split('T')[0]
+        }
+      });
+    }
 
-    // Check against package limits
-    if (existingSchedulesCount >= doctor.scheduleLimits.weekly) {
-      return res.status(403).json({ 
+    // Check against package limits using the used field
+    if (doctor.scheduleLimits.used >= doctor.scheduleLimits.weekly) {
+      return res.status(403).json({
         message: `Bạn đã đạt giới hạn lịch hẹn trong tuần (${doctor.scheduleLimits.weekly} lịch/tuần). Vui lòng nâng cấp gói để tạo thêm lịch hẹn.`,
-        currentCount: existingSchedulesCount,
+        currentCount: doctor.scheduleLimits.used,
         weeklyLimit: doctor.scheduleLimits.weekly
       });
     }
@@ -86,12 +110,12 @@ export const createSchedule = async (req, res) => {
     }
 
     // Check if the schedule is in the past
-    const scheduleDate = new Date(date);
-    const now = new Date();
-    const scheduleDateTime = new Date(scheduleDate);
+    const inputDate = new Date(date);
+    const currentTime = new Date();
+    const scheduleDateTime = new Date(inputDate);
     scheduleDateTime.setHours(endHour, endMinute, 0, 0);
     
-    if (scheduleDateTime <= now) {
+    if (scheduleDateTime <= currentTime) {
       return res.status(400).json({
         message: "Không thể tạo lịch hẹn cho thời gian đã qua. Vui lòng chọn thời gian trong tương lai."
       });
@@ -206,9 +230,18 @@ export const createSchedule = async (req, res) => {
 
     await schedule.save();
 
+    // Increment the used counter for weekly limit tracking
+    doctor.scheduleLimits.used += 1;
+    await doctor.save();
+
     res.status(201).json({
-      message: "Tạo lịch hẹn thành công",
-      schedule
+      message: `Tạo lịch hẹn thành công. Bạn đã tạo ${doctor.scheduleLimits.used}/${doctor.scheduleLimits.weekly} lịch trong tuần này`,
+      schedule,
+      weeklyScheduleInfo: {
+        currentCount: doctor.scheduleLimits.used,
+        weeklyLimit: doctor.scheduleLimits.weekly,
+        remainingSlots: doctor.scheduleLimits.weekly - doctor.scheduleLimits.used
+      }
     });
   } catch (error) {
     res.status(500).json({ 
@@ -497,8 +530,15 @@ export const deleteSchedule = async (req, res) => {
 
     await schedule.deleteOne();
 
-    res.status(200).json({ 
-      message: "Lịch hẹn đã được xóa thành công" 
+    // Decrement the used counter when a schedule is deleted
+    const doctor = await Doctor.findById(doctorId);
+    if (doctor && doctor.scheduleLimits.used > 0) {
+      doctor.scheduleLimits.used -= 1;
+      await doctor.save();
+    }
+
+    res.status(200).json({
+      message: "Lịch hẹn đã được xóa thành công"
     });
   } catch (error) {
     res.status(500).json({ 
