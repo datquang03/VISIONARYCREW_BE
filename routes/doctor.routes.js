@@ -78,7 +78,7 @@ router.get("/register", protectRouterForDoctor, getDoctorByRegisterId);
 router.get("/profile", protectRouterForDoctor, getMyProfile);
 router.put("/profile", protectRouterForDoctor, allowOnlyAcceptedDoctor, uploadAny, handleMulterError, updateProfile);
 // ===== DOCTOR AUTHENTICATED ROUTES (any doctor, any status) tiếp =====
-router.get("/:id", protectRouterForDoctor, getDoctorById);
+router.get("/:id", protectRouter, getDoctorById);
 // router.delete("/:doctorRegisterId", protectRouterForDoctor, deleteDoctorByRegisterId);
 
 // ===== PENDING OR REJECTED DOCTOR ROUTES =====

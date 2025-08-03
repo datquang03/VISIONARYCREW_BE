@@ -15,6 +15,8 @@ const NotificationSchema = new mongoose.Schema(
         "schedule_cancel", 
         "schedule_reject",
         "schedule_accept",
+        "schedule_completed",
+        "feedback_received",
         "booking",
         "cancel",
         // Có thể mở rộng thêm các loại khác

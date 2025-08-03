@@ -682,7 +682,12 @@ export const registerSchedule = async (req, res) => {
       await sendRegisterEmail({ doctor: schedule.doctor, patient: schedule.patient, schedule });
       
       // Tạo notification cho doctor
-      const doctorNotificationMessage = `Bạn có lịch hẹn mới từ ${schedule.patient?.username || 'Bệnh nhân'} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} (đang chờ xác nhận)`;
+      const doctorNotificationMessage = `📋 Lịch hẹn mới!\n\n👤 Bệnh nhân: ${schedule.patient?.username || 'Bệnh nhân'}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n⏳ Trạng thái: Đang chờ xác nhận`;
       await Notification.create({
         userId: schedule.doctor._id,
         type: "schedule_register",
@@ -691,7 +696,12 @@ export const registerSchedule = async (req, res) => {
       });
       
       // Tạo notification cho user
-      const userNotificationMessage = `Bạn đã đặt lịch thành công với bác sĩ ${schedule.doctor?.username || 'Bác sĩ'} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} (đang chờ bác sĩ xác nhận)`;
+      const userNotificationMessage = `✅ Đặt lịch thành công!\n\n👨‍⚕️ Bác sĩ: ${schedule.doctor?.username || 'Bác sĩ'}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n⏳ Trạng thái: Đang chờ bác sĩ xác nhận`;
       await Notification.create({
         userId: req.user._id,
         type: "schedule_register",
@@ -766,7 +776,12 @@ export const cancelRegisteredSchedule = async (req, res) => {
       await sendCancelEmail({ doctor: schedule.doctor, patient: req.user, schedule, cancelReason, admins });
       
       // Tạo notification cho doctor
-      const cancelNotificationMessage = `Lịch hẹn vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} đã bị hủy bởi bệnh nhân ${req.user?.username || 'Bệnh nhân'}`;
+      const cancelNotificationMessage = `❌ Lịch hẹn bị hủy!\n\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n👤 Bệnh nhân: ${req.user?.username || 'Bệnh nhân'}\n\n📝 Lý do: ${cancelReason}`;
       await Notification.create({
         userId: schedule.doctor._id,
         type: "schedule_cancel",
@@ -919,7 +934,12 @@ export const rejectRegisterSchedule = async (req, res) => {
         await Notification.create({
           userId: patientId, // bệnh nhân bị từ chối
           type: "schedule_reject",
-          message: `Lịch hẹn của bạn với bác sĩ ${schedule.doctor.username} đã bị từ chối vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}. Lý do: ${rejectedReason}`,
+          message: `❌ Lịch hẹn bị từ chối!\n\n👨‍⚕️ Bác sĩ: ${schedule.doctor.username}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n📝 Lý do: ${rejectedReason}`,
           data: { scheduleId: schedule._id, doctor: req.doctor._id, reason: rejectedReason },
         });
       }
@@ -1005,20 +1025,19 @@ export const cancelPendingSchedule = async (req, res) => {
 export const getPendingSchedules = async (req, res) => {
   try {
     const doctorId = req.doctor._id;
-
-    const schedules = await Schedule.find({
+    
+    const pendingSchedules = await Schedule.find({
       doctor: doctorId,
-      status: "pending"
-    })
-    .populate('patient', 'username email phone avatar')
-    .sort({ date: 1, 'timeSlot.startTime': 1 });
+      status: 'pending',
+      patient: { $exists: true, $ne: null }
+    }).populate('patient', 'username email phone avatar')
+      .populate('timeSlot')
+      .sort({ date: 1, 'timeSlot.startTime': 1 });
 
-    res.status(200).json(schedules);
+    res.json(pendingSchedules);
   } catch (error) {
-    res.status(500).json({
-      message: "Lỗi lấy lịch hẹn đang chờ",
-      error: error.message
-    });
+    console.error('Error getting pending schedules:', error);
+    res.status(500).json({ message: 'Lỗi server khi lấy danh sách lịch hẹn đang chờ' });
   }
 };
 
@@ -1053,7 +1072,18 @@ export const acceptRegisterSchedule = async (req, res) => {
       await sendRegisterEmail({ doctor: schedule.doctor, patient: schedule.patient, schedule });
       
       // Tạo notification cho doctor
-      const doctorAcceptMessage = `Bạn đã chấp nhận lịch hẹn từ ${schedule.patient?.username || 'Bệnh nhân'} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}`;
+      const doctorAcceptMessage = `✅ Đã chấp nhận lịch hẹn!\n\n👤 Bệnh nhân: ${schedule.patient?.username || 'Bệnh nhân'}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n✅ Trạng thái: Đã xác nhận`;
+      
+      console.log('🔍 Debug creating doctor notification:', {
+        doctorId: schedule.doctor._id,
+        message: doctorAcceptMessage
+      });
+      
       await Notification.create({
         userId: schedule.doctor._id,
         type: "schedule_accept",
@@ -1062,7 +1092,18 @@ export const acceptRegisterSchedule = async (req, res) => {
       });
       
       // Tạo notification cho patient
-      const patientAcceptMessage = `Lịch hẹn của bạn với bác sĩ ${schedule.doctor?.username || 'Bác sĩ'} đã được chấp nhận vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}`;
+      const patientAcceptMessage = `✅ Lịch hẹn đã được xác nhận!\n\n👨‍⚕️ Bác sĩ: ${schedule.doctor?.username || 'Bác sĩ'}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n✅ Trạng thái: Đã được bác sĩ xác nhận`;
+      
+      console.log('🔍 Debug creating patient notification:', {
+        patientId: schedule.patient._id,
+        message: patientAcceptMessage
+      });
+      
       await Notification.create({
         userId: schedule.patient._id,
         type: "schedule_accept",
@@ -1073,13 +1114,102 @@ export const acceptRegisterSchedule = async (req, res) => {
 
 
 
-    // Emit notification for doctor (accept)
-    io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_accept" });
-    // Emit notification for patient (accept)
-    io && io.to(schedule.patient._id.toString()).emit("notification", { type: "schedule_accept" });
+            // Emit notification for doctor (accept)
+        console.log('🔍 Debug: Emitting socket notification to doctor (accept):', schedule.doctor._id.toString());
+        io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_accept" });
+        // Emit notification for patient (accept)
+        console.log('🔍 Debug: Emitting socket notification to patient (accept):', schedule.patient._id.toString());
+        io && io.to(schedule.patient._id.toString()).emit("notification", { type: "schedule_accept" });
 
     res.status(200).json({
       message: "Chấp nhận lịch hẹn thành công",
+      schedule
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Complete schedule (for doctors only)
+export const completeSchedule = async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+    const doctorId = req.doctor._id;
+
+    // Find the schedule and ensure it belongs to the doctor and is accepted/booked
+    const schedule = await Schedule.findOne({
+      _id: scheduleId,
+      doctor: doctorId,
+      status: { $in: ["accepted", "booked"] }
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ 
+        message: "Lịch hẹn không tồn tại hoặc không thể hoàn thành" 
+      });
+    }
+
+    // Update the schedule status to completed
+    schedule.status = "completed";
+    await schedule.save();
+
+    // Populate doctor and patient details
+    await schedule.populate('doctor', 'username email');
+    await schedule.populate('patient', 'username email');
+
+    try {
+      // Tạo notification cho doctor
+      const doctorCompleteMessage = `✅ Đã hoàn thành lịch hẹn!\n\n👤 Bệnh nhân: ${schedule.patient?.username || 'Bệnh nhân'}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n✅ Trạng thái: Đã hoàn thành`;
+      await Notification.create({
+        userId: schedule.doctor._id,
+        type: "schedule_completed",
+        message: doctorCompleteMessage,
+        data: { scheduleId: schedule._id, patient: schedule.patient._id },
+      });
+      
+      // Tạo notification cho patient
+      const patientCompleteMessage = `✅ Lịch hẹn đã hoàn thành!\n\n👨‍⚕️ Bác sĩ: ${schedule.doctor?.username || 'Bác sĩ'}\n📅 Ngày: ${new Date(schedule.date).toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      })}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n✅ Trạng thái: Đã hoàn thành\n\n⭐ Vui lòng đánh giá buổi khám để giúp bác sĩ cải thiện dịch vụ!`;
+      await Notification.create({
+        userId: schedule.patient._id,
+        type: "schedule_completed",
+        message: patientCompleteMessage,
+        data: { scheduleId: schedule._id, doctor: schedule.doctor._id },
+      });
+    } catch (e) { 
+      console.error("Notification error:", e.message); 
+    }
+
+    // Emit notification for doctor and patient
+    console.log('🔍 Debug: Emitting socket notification to doctor:', schedule.doctor._id.toString());
+    io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_completed" });
+    console.log('🔍 Debug: Emitting socket notification to patient:', schedule.patient._id.toString());
+    io && io.to(schedule.patient._id.toString()).emit("notification", { type: "schedule_completed" });
+    
+    // Emit custom event for completed schedule
+    io && io.to(schedule.patient._id.toString()).emit("scheduleCompleted", { 
+      type: "schedule_completed",
+      schedule: {
+        _id: schedule._id,
+        doctor: schedule.doctor,
+        patient: schedule.patient,
+        date: schedule.date,
+        timeSlot: schedule.timeSlot,
+        status: schedule.status
+      }
+    });
+
+    res.status(200).json({
+      message: "Hoàn thành lịch hẹn thành công",
       schedule
     });
   } catch (error) {

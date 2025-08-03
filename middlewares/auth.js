@@ -109,6 +109,34 @@ export const protectRouterForDoctor = asyncHandler(async (req, res, next) => {
   }
 });
 
+// Protect router for admin (User model with admin role)
+export const protectRouterForAdmin = asyncHandler(async (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    try {
+      token = req.headers.authorization.split(" ")[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = await User.findById(decoded.id).select("-password");
+      if (!req.user) {
+        return res
+          .status(401)
+          .json({ message: "Không tìm thấy user với token này" });
+      }
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "Chỉ dành cho admin" });
+      }
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: "Chưa đăng nhập" });
+    }
+  } else {
+    return res.status(401).json({ message: "Chưa đăng nhập" });
+  }
+});
+
 // Allow only accepted doctors (Doctor model)
 export const allowOnlyAcceptedDoctor = asyncHandler(async (req, res, next) => {
   if (req.doctor?.role === "doctor") {

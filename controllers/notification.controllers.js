@@ -34,14 +34,25 @@ export const getNotifications = async (req, res) => {
     // Lấy userId từ user, doctor hoặc admin đang đăng nhập
     const userId = req.user?._id || req.doctor?._id || req.admin?._id;
     
+    console.log('🔍 Debug getNotifications:', {
+      user: req.user?._id,
+      doctor: req.doctor?._id,
+      admin: req.admin?._id,
+      finalUserId: userId
+    });
+    
     if (!userId) {
       return res.status(401).json({ message: "Không tìm thấy thông tin người dùng" });
     }
 
     const notifications = await Notification.find({ userId })
       .sort({ createdAt: -1 });
+    
+    console.log('🔍 Debug notifications found:', notifications.length);
+    
     res.json({ notifications });
   } catch (error) {
+    console.error('🔍 Debug getNotifications error:', error);
     res.status(500).json({ message: "Lỗi lấy thông báo", error: error.message });
   }
 };

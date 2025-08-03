@@ -39,7 +39,13 @@ export const sendRegisterEmail = async ({ doctor, patient, schedule }) => {
     const subject = 'Visionary Crew - Đặt lịch thành công';
     const patientName = patient?.username || patient?.fullName || 'Bạn';
     const doctorName = doctor?.fullName || 'Bác sĩ';
-    const text = `Xin chào ${patientName},\n\nBạn đã đặt lịch thành công với bác sĩ ${doctorName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.`;
+    const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const text = `Xin chào ${patientName},\n\n✅ Bạn đã đặt lịch thành công!\n\n👨‍⚕️ Bác sĩ: ${doctorName}\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n⏳ Trạng thái: Đang chờ bác sĩ xác nhận\n\n📞 Vui lòng chờ bác sĩ xác nhận lịch hẹn của bạn.`;
     await sendEmail(patient.email, subject, text);
   }
 };
@@ -48,14 +54,26 @@ export const sendCancelEmail = async ({ doctor, patient, schedule, cancelReason,
   if (doctor?.email && doctor?.fullName) {
     const subject = 'Visionary Crew - Lịch hẹn bị hủy';
     const patientName = patient?.username || patient?.fullName || 'Bệnh nhân';
-    const text = `Xin chào Dr. ${doctor.fullName},\n\nLịch hẹn vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} đã bị hủy bởi bệnh nhân ${patientName}.\nLý do: ${cancelReason}`;
+    const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const text = `Xin chào Dr. ${doctor.fullName},\n\n❌ Lịch hẹn bị hủy!\n\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n👤 Bệnh nhân: ${patientName}\n\n📝 Lý do: ${cancelReason}`;
     await sendEmail(doctor.email, subject, text);
   }
   if (patient?.email) {
     const subject = 'Visionary Crew - Hủy lịch thành công';
     const patientName = patient?.username || patient?.fullName || 'Bạn';
     const doctorName = doctor?.fullName || 'Bác sĩ';
-    const text = `Xin chào ${patientName},\n\nBạn đã hủy lịch hẹn với bác sĩ ${doctorName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.\nLý do: ${cancelReason}`;
+    const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const text = `Xin chào ${patientName},\n\n✅ Bạn đã hủy lịch hẹn thành công!\n\n👨‍⚕️ Bác sĩ: ${doctorName}\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n📝 Lý do: ${cancelReason}`;
     await sendEmail(patient.email, subject, text);
   }
   if (admins && Array.isArray(admins)) {
@@ -64,7 +82,13 @@ export const sendCancelEmail = async ({ doctor, patient, schedule, cancelReason,
         const subject = 'Visionary Crew - Lịch hẹn bị hủy';
         const patientName = patient?.username || patient?.fullName || 'Bệnh nhân';
         const doctorName = doctor?.fullName || 'Bác sĩ';
-        const text = `Admin thân mến,\n\nLịch hẹn giữa bác sĩ ${doctorName} và bệnh nhân ${patientName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} đã bị hủy.\nLý do: ${cancelReason}`;
+        const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        const text = `Admin thân mến,\n\n❌ Lịch hẹn bị hủy!\n\n👨‍⚕️ Bác sĩ: ${doctorName}\n👤 Bệnh nhân: ${patientName}\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n📝 Lý do: ${cancelReason}`;
         await sendEmail(admin.email, subject, text);
       }
     }
@@ -76,12 +100,24 @@ export const sendRejectEmail = async ({ doctor, patient, schedule, rejectedReaso
     const subject = 'Visionary Crew - Lịch hẹn bị từ chối';
     const patientName = patient?.username || 'Bạn';
     const doctorName = doctor?.username || 'Bác sĩ';
-    const text = `Xin chào ${patientName},\n\nLịch hẹn của bạn với bác sĩ ${doctorName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''} đã bị từ chối.\nLý do: ${rejectedReason}`;
+    const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const text = `Xin chào ${patientName},\n\n❌ Lịch hẹn bị từ chối!\n\n👨‍⚕️ Bác sĩ: ${doctorName}\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n📝 Lý do: ${rejectedReason}`;
     await sendEmail(patient.email, subject, text);
   }
   if (doctor?.email && doctor?.username) {
     const subject = 'Visionary Crew - Đã từ chối lịch hẹn';
-    const text = `Xin chào Dr. ${doctor.username},\n\nBạn đã từ chối lịch hẹn với bệnh nhân vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.\nLý do: ${rejectedReason}`;
+    const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const text = `Xin chào Dr. ${doctor.username},\n\n✅ Bạn đã từ chối lịch hẹn!\n\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n📝 Lý do: ${rejectedReason}`;
     await sendEmail(doctor.email, subject, text);
   }
   if (admins && Array.isArray(admins)) {
@@ -90,7 +126,13 @@ export const sendRejectEmail = async ({ doctor, patient, schedule, rejectedReaso
         const subject = 'Visionary Crew - Lịch hẹn bị từ chối';
         const patientName = patient?.username || 'Bệnh nhân';
         const doctorName = doctor?.username || 'Bác sĩ';
-        const text = `Admin thân mến,\n\nBác sĩ ${doctorName} đã từ chối lịch hẹn với bệnh nhân ${patientName} vào ngày ${schedule.date} lúc ${schedule.timeSlot?.startTime || ''}.\nLý do: ${rejectedReason}`;
+        const formattedDate = new Date(schedule.date).toLocaleDateString('vi-VN', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        const text = `Admin thân mến,\n\n❌ Lịch hẹn bị từ chối!\n\n👨‍⚕️ Bác sĩ: ${doctorName}\n👤 Bệnh nhân: ${patientName}\n📅 Ngày: ${formattedDate}\n🕐 Giờ: ${schedule.timeSlot?.startTime || ''}\n\n📝 Lý do: ${rejectedReason}`;
         await sendEmail(admin.email, subject, text);
       }
     }

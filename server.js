@@ -11,6 +11,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 import scheduleRoutes from "./routes/schedule.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import aiGuideRoutes from "./routes/aiGuide.routes.js";
+import feedbackRoutes from "./routes/feedback.routes.js";
 
 import { Server as SocketIOServer } from "socket.io";
 import http from "http";
@@ -48,6 +49,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiGuideRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 
 // Default route (for "/")
@@ -74,20 +76,20 @@ if (!process.env.VERCEL) {
   global.io = io;
 
   io.on("connection", (socket) => {
+    console.log('🔍 Debug: Socket connected:', socket.id);
 
     
     // Nhận userId khi client connect để join vào room riêng
     socket.on("join", (userId) => {
       if (userId) {
+        console.log('🔍 Debug: User joining room:', userId);
         socket.join(userId);
-
+        console.log('🔍 Debug: User joined room successfully');
       }
     });
 
-
-
     socket.on("disconnect", () => {
-  
+      console.log('🔍 Debug: Socket disconnected:', socket.id);
     });
 
 

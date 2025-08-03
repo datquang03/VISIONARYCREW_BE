@@ -5,6 +5,7 @@ import {
   login,
   getMyProfile,
   getUserById,
+  getUserProfileById,
   getAllUsers,
   updateUserProfile,
   deleteUserAccount,
@@ -55,6 +56,7 @@ const router = express.Router();
 router.post("/register", register);
 router.post("/verify-email", verifyEmailCode);
 router.post("/login", login);
+router.get("/profile/:id", protectRouter, getUserProfileById);
 router.get("/profile", protectRouter, getMyProfile);
 router.put("/profile", protectRouter, uploadAny, handleMulterError, updateUserProfile);
 router.get("/:id", getUserById);

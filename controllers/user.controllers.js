@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User/user.models.js";
+import Doctor from "../models/User/doctor.models.js";
 import Payment from "../models/payment.models.js";
 import { verifyEmail } from "../utils/sendEmail.js";
 import { generateToken } from "../middlewares/auth.js";
@@ -427,5 +428,41 @@ export const getMyTransactions = async (req, res) => {
       message: "Lỗi lấy lịch sử giao dịch",
       error: error.message 
     });
+  }
+};
+
+// Get user profile by ID (can be User or Doctor)
+export const getUserProfileById = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    // First try to find in User model
+    let user = await User.findById(userId).select(
+      "-password -isVerified -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail -tempEmailExpires -balance"
+    );
+
+    if (user) {
+      return res.status(200).json({
+        ...user.toObject(),
+        userType: 'user'
+      });
+    }
+
+    // If not found in User, try Doctor model
+    let doctor = await Doctor.findById(userId).select(
+      "-password -isVerified -emailVerificationCode -emailVerificationExpires -resetPasswordCode -resetPasswordExpires -verifyToken -verifyTokenExpires -tempEmail -tempEmailExpires"
+    );
+
+    if (doctor) {
+      return res.status(200).json({
+        ...doctor.toObject(),
+        userType: 'doctor'
+      });
+    }
+
+    // If not found in both models
+    return res.status(404).json({ message: "Người dùng không tồn tại" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };
