@@ -1,86 +1,188 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
-const messageSchema = new mongoose.Schema(
-  {
-    sender: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      refPath: 'senderModel'
-    },
-    senderModel: {
-      type: String,
-      required: true,
-      enum: ['User', 'Doctor']
-    },
-    receiver: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      refPath: 'receiverModel'
-    },
-    receiverModel: {
-      type: String,
-      required: true,
-      enum: ['User', 'Doctor']
-    },
-    content: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    messageType: {
-      type: String,
-      enum: ['text', 'image', 'file'],
-      default: 'text'
-    },
-    fileUrl: {
-      type: String,
-      trim: true
-    },
-    fileName: {
-      type: String,
-      trim: true
-    },
-    isRead: {
-      type: Boolean,
-      default: false
-    },
-    readAt: {
-      type: Date
-    },
-    // Emote/Reaction field
-    emotes: {
-      type: Map,
-      of: [{
-        userId: {
-          type: mongoose.Schema.Types.ObjectId,
-          required: true
-        },
-        userType: {
-          type: String,
-          enum: ['User', 'Doctor'],
-          required: true
-        },
-        emote: {
-          type: String,
-          required: true,
-          enum: ['❤️', '👍', '👎', '😂', '😮', '😢', '😡', '🎉', '👏', '🙏']
-        },
-        createdAt: {
-          type: Date,
-          default: Date.now
-        }
-      }],
-      default: new Map()
-    }
+const messageSchema = new mongoose.Schema({
+  // Sender information
+  senderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    refPath: 'senderType'
   },
-  {
-    timestamps: true
+  senderType: {
+    type: String,
+    required: true,
+    enum: ['User', 'Doctor'],
+    default: 'User'
+  },
+  senderName: {
+    type: String,
+    required: true
+  },
+  senderAvatar: {
+    type: String,
+    default: null
+  },
+
+  // Receiver information
+  receiverId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    refPath: 'receiverType'
+  },
+  receiverType: {
+    type: String,
+    required: true,
+    enum: ['User', 'Doctor'],
+    default: 'Doctor'
+  },
+  receiverName: {
+    type: String,
+    required: true
+  },
+  receiverAvatar: {
+    type: String,
+    default: null
+  },
+
+  // Message content
+  content: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 1000
+  },
+  messageType: {
+    type: String,
+    enum: ['text', 'image', 'file', 'system'],
+    default: 'text'
+  },
+  attachments: [{
+    fileName: String,
+    fileUrl: String,
+    fileType: String,
+    fileSize: Number
+  }],
+
+  // Message status
+  isRead: {
+    type: Boolean,
+    default: false
+  },
+  readAt: {
+    type: Date,
+    default: null
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+
+  // Conversation tracking
+  conversationId: {
+    type: String,
+    required: true,
+    index: true
+  },
+
+  // Timestamps
+  createdAt: {
+    type: Date,
+    default: Date.now,
+    index: true
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
-);
+}, {
+  timestamps: true
+});
 
-// Index để tối ưu query
-messageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
-messageSchema.index({ receiver: 1, isRead: 1 });
+// Indexes for better query performance
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ senderId: 1, receiverId: 1 });
+messageSchema.index({ receiverId: 1, isRead: 1 });
 
-const Message = mongoose.model("Message", messageSchema);
+// Virtual for conversation participants
+messageSchema.virtual('participants', {
+  ref: 'User',
+  localField: 'senderId',
+  foreignField: '_id',
+  justOne: true
+});
+
+// Generate conversation ID
+messageSchema.statics.generateConversationId = function(senderId, receiverId) {
+  const sortedIds = [senderId.toString(), receiverId.toString()].sort();
+  return `${sortedIds[0]}_${sortedIds[1]}`;
+};
+
+// Pre-save middleware to generate conversation ID if not exists
+messageSchema.pre('save', function(next) {
+  if (!this.conversationId) {
+    this.conversationId = this.constructor.generateConversationId(this.senderId, this.receiverId);
+  }
+  next();
+});
+
+// Instance method to mark as read
+messageSchema.methods.markAsRead = function() {
+  this.isRead = true;
+  this.readAt = new Date();
+  return this.save();
+};
+
+// Static method to get unread count
+messageSchema.statics.getUnreadCount = function(userId, userType) {
+  return this.countDocuments({
+    receiverId: userId,
+    receiverType: userType,
+    isRead: false,
+    isDeleted: false
+  });
+};
+
+// Static method to get conversations
+messageSchema.statics.getConversations = function(userId, userType) {
+  return this.aggregate([
+    {
+      $match: {
+        $or: [
+          { senderId: mongoose.Types.ObjectId(userId) },
+          { receiverId: mongoose.Types.ObjectId(userId) }
+        ],
+        isDeleted: false
+      }
+    },
+    {
+      $group: {
+        _id: '$conversationId',
+        lastMessage: { $last: '$$ROOT' },
+        unreadCount: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ['$receiverId', mongoose.Types.ObjectId(userId)] },
+                  { $eq: ['$isRead', false] }
+                ]
+              },
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      $sort: { 'lastMessage.createdAt': -1 }
+    }
+  ]);
+};
+
+const Message = mongoose.model('Message', messageSchema);
+
 export default Message; 

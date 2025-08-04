@@ -12,9 +12,11 @@ import scheduleRoutes from "./routes/schedule.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import aiGuideRoutes from "./routes/aiGuide.routes.js";
 import feedbackRoutes from "./routes/feedback.routes.js";
+import messageRoutes from "./routes/message.routes.js";
 
 import { Server as SocketIOServer } from "socket.io";
 import http from "http";
+import { handleSocketConnection, setSocketIO } from './controllers/message.controllers.js';
 
 dotenv.config();
 
@@ -50,7 +52,7 @@ app.use('/api/schedules', scheduleRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiGuideRoutes);
 app.use('/api/feedback', feedbackRoutes);
-
+app.use('/api/messages', messageRoutes);
 
 // Default route (for "/")
 app.get('/', (req, res) => {
@@ -72,18 +74,26 @@ if (!process.env.VERCEL) {
     }
   });
 
+  // Set socket.io instance for message controller
+  setSocketIO(io);
+
   // Lưu io vào global để controller có thể sử dụng
   global.io = io;
 
   io.on("connection", (socket) => {
     console.log('🔍 Debug: Socket connected:', socket.id);
 
+    // Handle message socket events
+    handleSocketConnection(socket);
     
     // Nhận userId khi client connect để join vào room riêng
-    socket.on("join", (userId) => {
+    socket.on("join", (data) => {
+      const { userId, userType } = data;
       if (userId) {
-        console.log('🔍 Debug: User joining room:', userId);
-        socket.join(userId);
+        console.log('🔍 Debug: User joining room:', userId, 'Type:', userType);
+        socket.userId = userId;
+        socket.userType = userType;
+        socket.join(`user_${userId}`);
         console.log('🔍 Debug: User joined room successfully');
       }
     });
@@ -91,8 +101,6 @@ if (!process.env.VERCEL) {
     socket.on("disconnect", () => {
       console.log('🔍 Debug: Socket disconnected:', socket.id);
     });
-
-
   });
 }
 
@@ -102,7 +110,8 @@ const startServer = async () => {
     await connectDB();
     if (!process.env.VERCEL) {
       server.listen(port, () => {
-        // Server started successfully
+        console.log(`🚀 Server running on port ${port}`);
+        console.log(`📡 Socket.IO server ready for real-time messaging`);
       });
     }
   } catch (err) {

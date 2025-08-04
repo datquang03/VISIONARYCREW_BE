@@ -1174,3 +1174,166 @@ export const getPaymentSystemHealth = async (req, res) => {
     });
   }
 };
+
+// Get all payments for admin
+export const getAllPayment = async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      status, 
+      packageType, 
+      doctorId,
+      startDate, 
+      endDate,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      search
+    } = req.query;
+
+    // Build query with filters
+    const query = {};
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    if (packageType && packageType !== 'all') {
+      query.packageType = packageType;
+    }
+    
+    if (doctorId) {
+      query.doctorId = doctorId;
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    // Search functionality
+    if (search) {
+      query.$or = [
+        { orderCode: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Pagination options
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit))); // Max 100 records per page
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Execute queries in parallel with population
+    const [payments, totalPayments] = await Promise.all([
+      Payment.find(query)
+        .populate('doctorId', 'fullName email phone username')
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limitNum)
+        .select('-paymentUrl') // Exclude sensitive payment URL
+        .lean(),
+      Payment.countDocuments(query)
+    ]);
+
+    // Add calculated fields
+    const enrichedPayments = payments.map(payment => ({
+      ...payment,
+      isExpired: payment.status === 'PENDING' && 
+                 (Date.now() - payment.createdAt.getTime()) > 15 * 60 * 1000,
+      ageInDays: Math.floor((Date.now() - payment.createdAt.getTime()) / (1000 * 60 * 60 * 24)),
+      doctorName: payment.doctorId?.fullName || 'Unknown Doctor',
+      doctorEmail: payment.doctorId?.email || 'No email',
+      doctorPhone: payment.doctorId?.phone || 'No phone'
+    }));
+
+    // Calculate statistics
+    const stats = {
+      total: totalPayments,
+      byStatus: {},
+      byPackageType: {},
+      totalAmount: 0,
+      successfulAmount: 0
+    };
+
+    // Get aggregated stats for current filter
+    const aggregateStats = await Payment.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" }
+        }
+      }
+    ]);
+
+    const packageStats = await Payment.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: "$packageType",
+          count: { $sum: 1 },
+          totalAmount: { $sum: "$amount" }
+        }
+      }
+    ]);
+
+    aggregateStats.forEach(stat => {
+      stats.byStatus[stat._id] = {
+        count: stat.count,
+        totalAmount: stat.totalAmount
+      };
+      stats.totalAmount += stat.totalAmount;
+      if (stat._id === 'PAID') {
+        stats.successfulAmount = stat.totalAmount;
+      }
+    });
+
+    packageStats.forEach(stat => {
+      stats.byPackageType[stat._id] = {
+        count: stat.count,
+        totalAmount: stat.totalAmount
+      };
+    });
+
+    // Calculate success rate
+    const successfulPayments = stats.byStatus['PAID']?.count || 0;
+    stats.successRate = totalPayments > 0 ? ((successfulPayments / totalPayments) * 100).toFixed(2) : 0;
+
+    res.status(200).json({
+      message: "Lấy danh sách thanh toán thành công",
+      payments: enrichedPayments,
+      pagination: {
+        currentPage: pageNum,
+        totalPages: Math.ceil(totalPayments / limitNum),
+        totalPayments,
+        limit: limitNum,
+        hasNextPage: pageNum < Math.ceil(totalPayments / limitNum),
+        hasPrevPage: pageNum > 1
+      },
+      filters: {
+        status,
+        packageType,
+        doctorId,
+        startDate,
+        endDate,
+        sortBy,
+        sortOrder,
+        search
+      },
+      statistics: stats
+    });
+  } catch (error) {
+    console.error("Get all payments error:", error);
+    res.status(500).json({ 
+      message: "Lỗi lấy danh sách thanh toán",
+      error: process.env.NODE_ENV === 'development' ? error.message : "INTERNAL_ERROR"
+    });
+  }
+};

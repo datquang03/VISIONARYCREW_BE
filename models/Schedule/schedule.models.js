@@ -12,6 +12,11 @@ const scheduleSchema = new mongoose.Schema(
       required: [true, "Date is required"],
       validate: {
         validator: function(v) {
+          // Allow past dates for accepted/completed schedules
+          if (this.status === 'accepted' || this.status === 'completed') {
+            return true;
+          }
+          // For other statuses, date cannot be in the past
           return v >= new Date().setHours(0, 0, 0, 0);
         },
         message: "Schedule date cannot be in the past"

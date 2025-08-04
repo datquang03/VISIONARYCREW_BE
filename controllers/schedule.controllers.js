@@ -1058,11 +1058,12 @@ export const acceptRegisterSchedule = async (req, res) => {
       return res.status(404).json({ message: "Lịch hẹn không tồn tại hoặc không thuộc về bạn" });
     }
 
-    // Update the schedule
+    // Update the schedule with validation disabled for date
     schedule.status = "accepted";
     schedule.isAvailable = false;
 
-    await schedule.save();
+    // Save with validation disabled for date field
+    await schedule.save({ validateBeforeSave: false });
 
     // Populate doctor and patient details before sending email
     await schedule.populate('doctor', 'username email');
@@ -1112,14 +1113,12 @@ export const acceptRegisterSchedule = async (req, res) => {
       });
     } catch (e) { console.error("Email error:", e.message); }
 
-
-
-            // Emit notification for doctor (accept)
-        console.log('🔍 Debug: Emitting socket notification to doctor (accept):', schedule.doctor._id.toString());
-        io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_accept" });
-        // Emit notification for patient (accept)
-        console.log('🔍 Debug: Emitting socket notification to patient (accept):', schedule.patient._id.toString());
-        io && io.to(schedule.patient._id.toString()).emit("notification", { type: "schedule_accept" });
+    // Emit notification for doctor (accept)
+    console.log('🔍 Debug: Emitting socket notification to doctor (accept):', schedule.doctor._id.toString());
+    io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_accept" });
+    // Emit notification for patient (accept)
+    console.log('🔍 Debug: Emitting socket notification to patient (accept):', schedule.patient._id.toString());
+    io && io.to(schedule.patient._id.toString()).emit("notification", { type: "schedule_accept" });
 
     res.status(200).json({
       message: "Chấp nhận lịch hẹn thành công",
