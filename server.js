@@ -95,6 +95,14 @@ if (!process.env.VERCEL) {
         socket.userType = userType;
         socket.join(`user_${userId}`);
         console.log('🔍 Debug: User joined room successfully');
+        
+        // Confirm room join to client
+        socket.emit('room_joined', { 
+          userId, 
+          userType, 
+          room: `user_${userId}`,
+          message: 'Successfully joined room'
+        });
       }
     });
 

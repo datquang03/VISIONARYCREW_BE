@@ -147,12 +147,14 @@ messageSchema.statics.getUnreadCount = function(userId, userType) {
 
 // Static method to get conversations
 messageSchema.statics.getConversations = function(userId, userType) {
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  
   return this.aggregate([
     {
       $match: {
         $or: [
-          { senderId: mongoose.Types.ObjectId(userId) },
-          { receiverId: mongoose.Types.ObjectId(userId) }
+          { senderId: userObjectId },
+          { receiverId: userObjectId }
         ],
         isDeleted: false
       }
@@ -166,7 +168,7 @@ messageSchema.statics.getConversations = function(userId, userType) {
             $cond: [
               {
                 $and: [
-                  { $eq: ['$receiverId', mongoose.Types.ObjectId(userId)] },
+                  { $eq: ['$receiverId', userObjectId] },
                   { $eq: ['$isRead', false] }
                 ]
               },

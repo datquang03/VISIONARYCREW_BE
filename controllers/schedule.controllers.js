@@ -6,6 +6,7 @@ import Notification from "../models/notification.models.js";
 import { io } from "../server.js";
 import User from '../models/User/user.models.js';
 
+
 // Utility function to check and reset weekly schedule limits
 const checkAndResetWeeklyLimits = async (doctor) => {
   const weekStart = new Date();
@@ -1111,14 +1112,16 @@ export const acceptRegisterSchedule = async (req, res) => {
         message: patientAcceptMessage,
         data: { scheduleId: schedule._id, doctor: schedule.doctor._id },
       });
+
+      console.log('✅ Schedule accepted - Chat conversation unlocked for both parties');
     } catch (e) { console.error("Email error:", e.message); }
 
     // Emit notification for doctor (accept)
-    console.log('🔍 Debug: Emitting socket notification to doctor (accept):', schedule.doctor._id.toString());
-    io && io.to(schedule.doctor._id.toString()).emit("notification", { type: "schedule_accept" });
-    // Emit notification for patient (accept)
-    console.log('🔍 Debug: Emitting socket notification to patient (accept):', schedule.patient._id.toString());
-    io && io.to(schedule.patient._id.toString()).emit("notification", { type: "schedule_accept" });
+    console.log('🔍 Debug: Emitting socket notification to doctor (accept):', `user_${schedule.doctor._id}`);
+    io && io.to(`user_${schedule.doctor._id}`).emit("notification", { type: "schedule_accept" });
+    // Emit notification for patient (accept) 
+    console.log('🔍 Debug: Emitting socket notification to patient (accept):', `user_${schedule.patient._id}`);
+    io && io.to(`user_${schedule.patient._id}`).emit("notification", { type: "schedule_accept" });
 
     res.status(200).json({
       message: "Chấp nhận lịch hẹn thành công",
