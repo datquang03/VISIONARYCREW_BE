@@ -19,10 +19,10 @@ export const register = async (req, res) => {
         .json({ message: "Vui lòng nhập đầy đủ thông tin" });
     }
 
-    // Check if user already exists
+    // Check if user already exists với timeout
     const existingUser = await User.findOne({
       $or: [{ email }, { phone }, { username }],
-    });
+    }).maxTimeMS(10000);
     if (existingUser) {
       return res.status(400).json({
         message: `Người dùng với ${
