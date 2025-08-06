@@ -17,17 +17,9 @@ const isConversationUnlocked = async (userId, doctorId) => {
   try {
     // Check if there's an approved schedule between user and doctor
     const approvedSchedule = await Schedule.findOne({
-      patient: userId,
-      doctor: doctorId,
-      status: 'accepted'
-    });
-
-    console.log('🔍 Debug isConversationUnlocked:', {
-      userId,
-      doctorId,
-      foundSchedule: !!approvedSchedule,
-      scheduleStatus: approvedSchedule?.status,
-      scheduleId: approvedSchedule?._id
+      userId: userId,
+      doctorId: doctorId,
+      status: 'approved'
     });
 
     return !!approvedSchedule;
@@ -43,24 +35,11 @@ export const getConversationUnlockStatus = async (req, res) => {
     const { userId, doctorId } = req.params;
     const currentUserId = req.user?._id || req.doctor?._id;
 
-    console.log('🔍 Debug getConversationUnlockStatus:', {
-      userId,
-      doctorId,
-      currentUserId,
-      userType: req.user ? 'User' : req.doctor ? 'Doctor' : 'Unknown'
-    });
-
     if (!currentUserId) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
     const isUnlocked = await isConversationUnlocked(userId, doctorId);
-
-    console.log('🔍 Debug unlock status result:', {
-      userId,
-      doctorId,
-      isUnlocked
-    });
 
     res.status(200).json({
       message: 'Unlock status retrieved successfully',
@@ -291,32 +270,6 @@ export const getUserConversations = async (req, res) => {
     }
 
     const conversations = await Message.getConversations(userId, userType);
-    
-    console.log('🔍 getUserConversations result:', {
-      userId: userId.toString(),
-      userType,
-      conversationsFound: conversations.length,
-      hasMessages: conversations.length > 0
-    });
-    
-    // Test: Get all messages for this user to debug
-    const allMessages = await Message.find({
-      $or: [
-        { senderId: userId },
-        { receiverId: userId }
-      ]
-    }).sort({ createdAt: -1 }).limit(3);
-    
-    console.log('🔍 Recent messages for user:', {
-      count: allMessages.length,
-      messages: allMessages.map(msg => ({
-        _id: msg._id,
-        senderId: msg.senderId?.toString(),
-        receiverId: msg.receiverId?.toString(),
-        conversationId: msg.conversationId,
-        content: msg.content?.substring(0, 50) + '...'
-      }))
-    });
 
     // Get additional info for each conversation
     const enrichedConversations = await Promise.all(
