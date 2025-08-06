@@ -30,6 +30,7 @@ const __dirname = path.dirname(__filename);
 const corsOptions = {
   origin: [
     'http://localhost:5173', // Allow local frontend (adjust port if needed, e.g., 5173 for Vite)
+    process.env.CLIENT_URL || 'https://visionarycrew-fe.vercel.app', // Allow frontend domain
     process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app' // Allow backend domain
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Added PATCH
@@ -67,6 +68,7 @@ if (!process.env.VERCEL) {
     cors: {
       origin: [
         'http://localhost:5173',
+        process.env.CLIENT_URL || 'https://visionarycrew-fe.vercel.app', // Allow frontend domain
         process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app'
       ],
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
