@@ -60,6 +60,19 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Debug route để kiểm tra environment variables
+app.get('/debug/env', (req, res) => {
+  res.json({
+    mongodb_uri_exists: !!process.env.MONGODB_URI,
+    mongodb_uri_length: process.env.MONGODB_URI?.length || 0,
+    mongodb_uri_preview: process.env.MONGODB_URI?.substring(0, 30) + '...',
+    node_env: process.env.NODE_ENV,
+    vercel: !!process.env.VERCEL,
+    client_url: process.env.CLIENT_URL,
+    jwt_secret_exists: !!process.env.JWT_SECRET
+  });
+});
+
 // Tạo HTTP server để dùng với socket.io
 const server = http.createServer(app);
 let io;
