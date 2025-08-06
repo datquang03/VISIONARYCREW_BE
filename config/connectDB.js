@@ -7,11 +7,12 @@ const connectDB = async () => {
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 15000, // Tăng timeout
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 30000, // Tăng timeout lên 30s
+      socketTimeoutMS: 60000,
       bufferMaxEntries: 0,
-      maxPoolSize: 50,
-      connectTimeoutMS: 15000,
+      maxPoolSize: 10, // Giảm pool size cho Vercel
+      connectTimeoutMS: 30000,
+      family: 4, // Force IPv4
     });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (err) {
