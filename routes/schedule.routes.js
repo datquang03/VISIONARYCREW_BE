@@ -16,6 +16,7 @@ import {
   rejectRegisterSchedule,
   acceptRegisterSchedule,
   getPendingSchedules,
+  completeSchedule,
 } from "../controllers/schedule.controllers.js";
 
 // Debug middleware để kiểm tra request
@@ -41,6 +42,8 @@ router.delete("/:scheduleId", protectRouterForDoctor, deleteSchedule);
 router.post("/reactivate/:scheduleId", protectRouterForDoctor, makeScheduleAvailable);
 router.post("/reject/:scheduleId", protectRouterForDoctor, rejectRegisterSchedule);
 router.post("/accept/:scheduleId", protectRouterForDoctor, acceptRegisterSchedule);
+router.post("/complete/:scheduleId", protectRouterForDoctor, completeSchedule);
+
 
 // User routes (requires authentication)
 router.post("/register/:scheduleId", debugRequest, protectRouter, registerSchedule);

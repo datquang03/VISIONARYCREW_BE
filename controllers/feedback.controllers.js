@@ -5,7 +5,14 @@ import { io } from "../server.js";
 
 export const createFeedback = async (req, res) => {
   try {
+
+    
     const { scheduleId, rating, comment, isAnonymous } = req.body;
+    
+    if (!req.user) {
+      return res.status(401).json({ message: "Người dùng chưa đăng nhập" });
+    }
+    
     const patientId = req.user._id;
 
     // Check if schedule exists and belongs to the patient
@@ -14,6 +21,8 @@ export const createFeedback = async (req, res) => {
       return res.status(404).json({ message: "Lịch hẹn không tồn tại" });
     }
 
+
+    
     if (String(schedule.patient) !== String(patientId)) {
       return res.status(403).json({ message: "Bạn không có quyền đánh giá lịch hẹn này" });
     }
@@ -41,10 +50,10 @@ export const createFeedback = async (req, res) => {
 
     // Create notification for doctor
     const doctorNotification = new Notification({
-      user: schedule.doctor._id,
+      userId: schedule.doctor._id,
       type: "feedback_received",
       message: `Bạn có đánh giá mới từ bệnh nhân với ${rating} sao`,
-      relatedId: feedback._id
+      data: { feedbackId: feedback._id, rating: rating }
     });
     await doctorNotification.save();
 
@@ -56,8 +65,11 @@ export const createFeedback = async (req, res) => {
       feedback 
     });
   } catch (error) {
-    console.error('Error creating feedback:', error);
-    res.status(500).json({ message: "Có lỗi xảy ra khi tạo đánh giá" });
+    console.error('Create feedback error:', error);
+    res.status(500).json({ 
+      message: "Có lỗi xảy ra khi tạo đánh giá",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 

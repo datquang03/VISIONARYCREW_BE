@@ -16,34 +16,34 @@ const PACKAGE_PRICES = {
     1: 3000,   // 1 month
   },
   gold: {
-    1: 199000,   // 1 month
+    1: 5000,   // 1 month
   },
   diamond: {
-    1: 299000,   // 1 month
+    1: 10000,   // 1 month
   }
 };
 
 // Package benefits configuration
 const PACKAGE_BENEFITS = {
   free: {
-    scheduleLimit: 0,
-    isPriority: false,
-    description: "Gói miễn phí - Không thể đặt lịch"
-  },
-  silver: {
     scheduleLimit: 5,
     isPriority: false,
-    description: "Gói Bạc - 5 lịch hẹn/tuần"
+    description: "Gói miễn phí - 5 lịch hẹn/tuần"
   },
-  gold: {
+  silver: {
     scheduleLimit: 10,
     isPriority: false,
-    description: "Gói Vàng - 10 lịch hẹn/tuần"
+    description: "Gói Bạc - 10 lịch hẹn/tuần"
+  },
+  gold: {
+    scheduleLimit:20,
+    isPriority: false,
+    description: "Gói Vàng - 20 lịch hẹn/tuần"
   },
   diamond: {
-    scheduleLimit: 20,
+    scheduleLimit: 100,
     isPriority: true,
-    description: "Gói Kim Cương - 20 lịch hẹn/tuần + Ưu tiên hiển thị"
+    description: "Gói Kim Cương - 100 lịch hẹn/tuần + Ưu tiên hiển thị"
   }
 };
 
