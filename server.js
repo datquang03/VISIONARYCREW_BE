@@ -55,7 +55,7 @@ const corsOptions = {
     'https://visionarycrew-fe.vercel.app',
     'https://visionarycrew-fe-git-datquang-dat-quangs-projects.vercel.app',
     process.env.CLIENT_URL,
-    process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app'
+    process.env.DOMAIN_BE || 'https://visionarycrew-be-rpo7.vercel.app'
   ].filter(Boolean), // Remove any undefined values
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
