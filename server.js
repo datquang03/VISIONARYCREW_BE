@@ -52,7 +52,7 @@ const __dirname = path.dirname(__filename);
 const corsOptions = {
   origin: [
     'http://localhost:5173',
-    'https://visionarycrew-fe-git-datquang-dat-quangs-projects.vercel.app',
+    'https://visionarycrew-fe-2ld3.vercel.app',
     'https://visionarycrew-be-rpo7.vercel.app'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -68,7 +68,7 @@ app.use(cors(corsOptions));
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:5173',
-    'https://visionarycrew-fe-git-datquang-dat-quangs-projects.vercel.app',
+    'https://visionarycrew-fe-2ld3.vercel.app',
     'https://visionarycrew-be-rpo7.vercel.app'
   ];
   
@@ -158,7 +158,7 @@ if (!process.env.VERCEL) {
     cors: {
       origin: [
         'http://localhost:5173',
-        process.env.CLIENT_URL || 'https://visionarycrew-fe.vercel.app', // Allow frontend domain
+        process.env.CLIENT_URL || 'https://visionarycrew-fe-2ld3.vercel.app', // Allow frontend domain
         process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app'
       ],
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
