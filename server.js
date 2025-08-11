@@ -51,17 +51,29 @@ const __dirname = path.dirname(__filename);
 // CORS configuration
 const corsOptions = {
   origin: [
-    'http://localhost:5173', // Allow local frontend (adjust port if needed, e.g., 5173 for Vite)
-    process.env.CLIENT_URL || 'https://visionarycrew-fe.vercel.app', // Allow frontend domain
-    process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app' // Allow backend domain
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Added PATCH
+    'http://localhost:5173',
+    'https://visionarycrew-fe.vercel.app',
+    'https://visionarycrew-fe-git-datquang-dat-quangs-projects.vercel.app',
+    process.env.CLIENT_URL,
+    process.env.DOMAIN_BE || 'https://visionarycrew-be.vercel.app'
+  ].filter(Boolean), // Remove any undefined values
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true // Support cookies or auth headers if needed
+  credentials: true,
+  maxAge: 86400 // Preflight results can be cached for 24 hours
 };
 
 // Middleware
 app.use(cors(corsOptions));
+
+// Add headers for all responses
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Credentials', true);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  next();
+});
 app.use(express.json());
 
 // Serve static HTML from public/
